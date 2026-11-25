@@ -187,3 +187,13 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   Nothing was changed in production.
 - **Note (AGENT_RULES 13):** the Supabase connector on this machine also exposes write tools
   (`execute_sql`, `apply_migration`). They were not used and must never be used against production.
+
+## L14. Production default privileges differ from the local image (open, see tasks/incidents/2026-11-25-drift.md)
+
+- The first real drift (12 lines) is production's stricter default privileges in `public` (no
+  SELECT/INSERT/UPDATE/DELETE for anon/authenticated/service_role on future tables). Real, not noise:
+  local/CI would allow what production denies.
+- **Fix to the framework (suggested, db-architect contract):** every migration that creates an object in an
+  exposed schema grants exactly the privileges the API needs, and a pgTAP test checks those grants.
+- **Process note:** drift run 45624888333's artifact was downloaded and deleted about a minute after upload;
+  the opt-in upload path worked as designed (gitleaks clean).
