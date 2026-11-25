@@ -479,3 +479,12 @@ the output line prefixes and rule 3 are unchanged.
   The existing tests need no change (all expectations hold under the new rule).
 - **Left:** qa-test adds the tests above; security and review re-run on the new commits (gates are stale now: code
   changed). The orchestrator records in the brief that Q1 rule 2 is amended by this entry.
+
+### orchestrator, 2026-11-25 (round-1 gates)
+
+- Security gate round 1: FAIL (F1, HIGH: the S16 "tip contains C" rule could be bypassed by a revert and a later
+  force-push or fast-forward merge commit). Review round 1: APPROVE (nits). Round-1 gate files were not committed.
+- **Q1 rule 2 is amended** by the "devops-cicd, 2026-11-25 (F1 fix)" entry above: the label must postdate the last
+  push that changed the branch's net protected diff (same-second ties fail closed). Commits 4982db9, fcaa7f3.
+- Next: qa-test regression tests (legit, A, B, intermediate differing push, unknown tip, same-second tie), full
+  verify.sh, then both gates again in fresh contexts.
