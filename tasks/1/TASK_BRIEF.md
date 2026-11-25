@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | DONE |
 | Owner role | db-architect (spec), db-builder (migration, tests) |
 | Branch | `db/1-default-privileges` |
 | Worktree | none (repo root; single builder, no parallel work) |
@@ -60,6 +60,14 @@ specs/1/**
 - **Verified:** `verify.sh: FAIL 1/18 failed: destructive statements need approval (1 skipped)`: only the false positive in L15; DB reset, `supabase test db` (Files=2, Tests=15, PASS) and SQL lint pass. Re-applying the migration on the local DB leaves `pg_default_acl` unchanged (idempotent). Resulting default ACL for postgres in public: tables `service_role=Dxtm` only, sequences and functions owner only.
 - **Left to do:** security gate, review, PR, CI. The destructive check needs the person's decision (L15). After merge: the integration applies it; read-only migration list; default drift run green; close #4.
 - **Next role must know:** from now on every new table/sequence/function in public needs explicit GRANTs (schema.md convention). No `types/database.ts` regeneration needed (no tables).
+
+### git-release, 2026-11-25 (post-deploy, task moved to DONE on the orchestrator's instruction)
+
+- **Deploy:** PR #7 squash-merged as 5fcb5ba at 14:22 UTC; the Supabase integration check on 5fcb5ba: success.
+- **Production migration history (read-only):** `20261125104017 init`, `20261125135502 default_privileges_baseline`.
+- **Drift after deploy:** run 45634163709 on 5fcb5ba, `diff: 0 non-comment lines`, "No drift.", no artifact. Issue #4 closed.
+- **Acceptance:** AC1-AC5 met (PR #7 gates and CI); AC6 met (history + green drift). There is no user-facing feature to test as a real user; the behavior (anon/authenticated get nothing on new tables) is proven by `supabase/tests/01_default_privileges_test.sql` and the security gate's live check.
+- **Note:** the post-deploy record lives here instead of `specs/1/post-deploy.md`, because a commit under `specs/1/` would count as a code change and make the task's gates stale in `gate-check.sh` (lessons L17).
 
 ## Blocked (fill in only when BLOCKED)
 
