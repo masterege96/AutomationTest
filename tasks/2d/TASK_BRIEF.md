@@ -67,7 +67,9 @@ framework change for devops-cicd and the person; this task avoids it by recordin
 - **Result:** 2c `DONE`; 2a `VERIFYING` (the person runs the two read-only `pg_default_acl` SELECTs, see
   `specs/2a/post-deploy.md`); 2b `VERIFYING` (dashboard items 1-21 and item 22 are the person's).
 - **verify.sh:** `bash scripts/verify.sh` (brief from branch name): `verify.sh: PASS 17/17 (1 skipped)` (skipped: test:e2e, no script).
-- **Left to do:** security gate (`specs/2d/security-gate.md`) and code review (`specs/2d/review.md`), each in a fresh context and its own commit after the records.
+- **Gates:** security PASS (`specs/2d/security-gate.md`), review APPROVE (`specs/2d/review.md`), each from a fresh context, each in its own commit after the records.
+- **Gate nits left out of the records on purpose (fixing them would make both gates stale; they go into the 2a/2b close-out):** (review) the first 2a drift run 45647204820 also logged `diff: 0 non-comment lines, sha256 e3b0c44298fc`, "No drift."; (review) check the Supabase Preview check on `af59b2d` again when 2b closes (it was in_progress at 16:20 UTC); (security I1) the person may record in `tasks/decisions.md` that read-only verification SELECTs in the SQL editor are allowed for them; (security I2) item 22: the key stays in a shell variable only, and if there's no 429 by attempt 9, stop and tell security (see `specs/2b/security-gate.md`).
+- **Left to do (done, see Gates):** security gate (`specs/2d/security-gate.md`) and code review (`specs/2d/review.md`), each in a fresh context and its own commit after the records.
 
 ## Blocked (fill in only when BLOCKED)
 
