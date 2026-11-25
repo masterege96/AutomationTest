@@ -274,6 +274,25 @@ Question 2 is for the person to decide. Nothing was built. Sources: `node_module
 
 **Recommendation: Option A (route handlers).** Every API AC is written as an HTTP status, and with route handlers each one maps directly to a status and our error format. qa-test can call them with plain `fetch` in the abuse suite, and the one CSRF control we add is a small function with its own test. Option B would mean rewording those ACs and calling per-build action ids in abuse tests.
 
+### db-builder, 2026-11-25
+
+Branch `db/3-todos-schema` (worktree `wt-3-db-builder`, from `feat/3-todos`). Not pushed, not merged.
+- **Changed:**
+  - `supabase/migrations/20261125165117_create_todos.sql` (new, via `npx supabase migration new create_todos`): `specs/3/schema.md` section 9, extracted byte-for-byte from the spec's fenced block (no edits, LF, no destructive words).
+  - `supabase/tests/03_todos_test.sql` (new, pgTAP, `plan(163)`): every schema.md section 7 case: S1-S5, G1-G5, R1-R5, M1-M5 (M4 near the end, extra grant revoked right after and checked), N1, C1-C3, K1 (last). Assertions always run as `postgres`; every `throws_ok`/`lives_ok` string ends with `; reset role` (L20); allowed cases write to temp table `t3_out`; `current_user = 'postgres'` is asserted after each block. Fixtures: users A `1111…`, B `2222…` (`@test.local`), to-dos A1-A3, B1-B2 backdated one day.
+  - `types/database.ts` (new, generated; backend-dev owns later edits): `npx supabase gen types typescript --local > types/database.ts` from Git Bash after `db reset`. ASCII/UTF-8, LF, no BOM, exit 0 (stderr only had the `--local` v4 deprecation warning and the oxfmt hint; oxfmt not run).
+- **Verified:** `bash scripts/verify.sh`: `verify.sh: PASS 17/17 (1 skipped)` (skip = `test:e2e`, no script). Includes `db reset`, `supabase test db` (all four files pass), `db lint --level error`, typecheck, lint, test, build.
+- **Negative control** (run once, in rolled-back transactions through `psql` in `supabase_db_AutomationTest`, not committed): adding `grant insert, update on public.todos to authenticated;` (table-wide) before the fixtures made 26 tests fail (M1, M2, M3, the C2/C3 update cases on A1, M4 update and its follow-ups), all 163 still ran (no role leak). `alter table public.todos disable row level security;` made 13 fail (R1 x4, R3 B1 x3, R4 B1 x2, M1 "no row for B", M4 x2 + follow-up). The tests can fail.
+- **Commits:** `87d3eb9 db: create public.todos with owner-only RLS, column grants and tests`, `280591d chore: generate types/database.ts for public.todos`, plus this handoff (`docs:`).
+- **Backend-dev must know:**
+  - Error codes from the DB (PostgREST maps them): `42501` `permission denied for table todos` when a request names any column other than `title` on insert or other than `title`/`done` on update (or anon touches the table at all); `42501` `new row violates row-level security policy for table "todos"` only if the column grants were wider (second layer); `23514` `new row for relation "todos" violates check constraint "todos_title_trimmed"` / `"todos_title_length"`; `23502` for a null title. A `23514` or `42501` from a signed-in user means your whitelist/trim let something through: treat as 500 `internal_error`, per schema.md handoff.
+  - Not-yours and not-found both give 0 rows on select/update/delete (no error): use `.select()` and map empty to 404.
+  - Ordering: `order('created_at', { ascending: false }).order('id', { ascending: false })` (index `todos_user_id_created_at_idx` matches; `id` breaks ties for same-instant creates).
+  - Title must arrive trimmed with JS `trim()` and be 1-200 code points; the DB rejects untrimmed values instead of trimming them.
+  - `types/database.ts`: `Insert`/`Update` allow `user_id`, `id`, `done`, `created_at`, `updated_at` because gen types ignores column grants; your zod whitelist must match schema.md section 4, not the types. `Relationships` for `todos` is **empty** (schema.md section 11 expected the FK to `users`): the generator only includes `public`/`graphql_public`, so the FK into `auth` isn't listed. Harmless (we never embed `users`). The file also has a `graphql_public` section and starts with a blank line (raw CLI output, not formatted).
+- **Spec notes (no deviation made):** section 9's `btrim` set is written with literal Unicode characters (U+00A0 ... U+FEFF, invisible in most editors; only U+000B is a `\u` escape), while the note under it speaks of `E'...\uXXXX...'`. Copied as-is: same 19+6 characters, same meaning, applies and passes C1/C2. If reviewers prefer visible `\uXXXX` escapes, that is a db-architect change before merge (never after).
+- **Left to do:** backend-dev (API, uses these types), qa-test (integration/abuse tests on this schema). Production unchanged; it gets this migration only via merge to `main` (schema.md section 10 has the post-deploy read-only queries).
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
