@@ -50,7 +50,7 @@ postcss.config.*
    - Supabase-hosted: GitHub integration "Deploy to production" ON for `main`, written in `PROJECT_CONTEXT.md` as `Deploy path: Supabase GitHub integration`.
    - Self-hosted / plain Postgres: `db push --dry-run` (logged), backup (`pg_dump`, stored off-server), `db push`, then app deploy. GitHub Environment `production` with required approval.
    - App deploy runs only after migrations succeed.
-5. **`drift.yml`**: nightly schedule + after each deploy; read-only `supabase db diff` against production for the exposed schemas. Fails on a non-empty diff (content, not exit code), and opens/updates an issue labeled `drift` that links to the run (never pastes the diff: the repo may be public). The job uses `environment: production`: secrets live in the `production` environment, restricted to main. Secrets go only to the steps that need them (link, diff), and checkout uses `persist-credentials: false`.
+5. **`drift.yml`**: nightly schedule + after each deploy; read-only `supabase db diff` against production for the exposed schemas. Fails on a non-empty diff (content, not exit code), and opens/updates an issue labeled `drift` that links to the run (never pastes the diff: the repo may be public). The job uses `environment: production`: secrets live in the `production` environment, restricted to main. Secrets go only to the steps that need them (link, diff), and checkout uses `persist-credentials: false`. A manual run with `upload_diff=true` (the person's choice) uploads the raw `diff.sql` as a 1-day artifact; whoever runs it downloads it and deletes the artifact right away. The schedule and the default dispatch never expose the diff.
 6. **`.env.example`** listing every env var name.
 
 ## Rules
