@@ -92,6 +92,32 @@ No routes, client code, env vars, raw SQL from strings, `dangerouslySetInnerHTML
 created in a Supabase-managed schema and no `IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS` (convention rule 5 holds).
 Rows 2, 3, 5, 8, 9, 11, 13 unchanged by this diff; rows 4, 6, 7, 10, 12 N/A per threat model.
 
+## Re-gate after main merge (2026-11-25, fresh context)
+
+Trigger: code review 97f37e2 (APPROVE), then merge commit 7b136ab (origin/main 69c6151 = PR #8 tasks/ docs,
+PR #9 verify.sh reorder) after the gate above (c55f0e4). Re-checked after `git fetch origin`:
+
+- **Net PR scope:** `git diff origin/main...HEAD` = the 2a migration, the 2a test, `specs/2a/**` (schema,
+  threat model, this gate, review) and `tasks/**` (2a brief, board row, decisions entry, lesson L20). Nothing else.
+- **Gated code unchanged:** `git diff c55f0e4 HEAD -- supabase/` is empty; migration and test are byte-identical
+  to what was gated above (no CR in either).
+- **Merge resolution in `tasks/`:** no conflict markers anywhere in `tasks/`, `specs/`, `supabase/`, `scripts/`.
+  `tasks/board.md` keeps main's rows (0, 1, 2c) and adds 2a. `tasks/lessons.md` headings L16-L20 are unique;
+  main's L17 (post-deploy staleness) is kept and this branch's `throws_ok` role-leak lesson is now L20, text
+  unchanged. The brief's db-builder handoff says "See lessons L20"; the orchestrator note records the renumbering
+  and leaves review nit 6 open. `specs/2a/review.md` still says L17 in its findings; that is the pre-merge
+  historical reference the renumbering answers, not a security issue.
+- **PR #9 (`scripts/verify.sh`):** `git diff c55f0e4 HEAD -- scripts/verify.sh` is a pure block move (database
+  section now 5, project checks now 6, plus a 2-line comment); no check added, removed or changed, and
+  `HEAD:scripts/` equals `origin/main:scripts/`. Scope, migration, destructive, secret, RLS and client-bundle
+  checks run as before. No effect on this task's security controls or tests.
+- **verify.sh (under the shared lock, released afterwards):** `bash scripts/verify.sh --brief tasks/2a/TASK_BRIEF.md`
+  -> `verify.sh: PASS 18/18 (1 skipped)` (skip: `test:e2e`, no script). The `[database]` section now runs first:
+  all migrations apply to an empty DB, `supabase test db` PASS, SQL lint no errors; then typecheck, lint, test,
+  build PASS.
+
+Re-gate result: PASS. Findings above carried forward unchanged.
+
 ## Findings
 
 None blocking. Notes:
