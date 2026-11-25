@@ -163,3 +163,86 @@ Today: **changes needed: schema.md not written yet**.
    know the drift check doesn't cover it.
 2. **Production starting state:** production's current global default for `postgres` functions isn't known from
    the repo. The migration is idempotent either way; the AC8 read-only check confirms the end state.
+
+## Sign-off on schema.md (2026-11-25)
+
+Reviewer: security, fresh context. Read `specs/2a/schema.md` against this model's items 1-8, plus one read-only
+`SELECT` on the local DB (`pg_default_acl` for role `postgres`). No writes, no cloud or production access.
+
+**Result: changes needed (small, test-list only):** the three items under "Required changes" below. Items 1-8
+are otherwise covered and consistent with this model: exact SQL (global, `FOR ROLE "postgres"`, no `IN SCHEMA`,
+procedures covered), creator role and schemas, no existing function changes, the merge with task 1's `public`
+row, the must-not-break table, the binding grant convention (including the SECURITY DEFINER rules and
+"no functions in Supabase-managed schemas"), production effect and rollback, the drift answer with a read-only
+post-deploy check, and T1-T5 + idempotence. Once schema.md applies the three changes, this sign-off is
+**matches** without another security review (db-architect notes the edit in the brief's handoff; the gate checks
+the tests against this section).
+
+### Verified claim (Q1 premise)
+
+Local read-only query (`pg_default_acl` where `defaclrole = 'postgres'`):
+
+| Schema | Type | ACL |
+|---|---|---|
+| public | f | `{postgres=X/postgres}` (task 1) |
+| storage | f | `{postgres=X, anon=X, authenticated=X, service_role=X}` |
+| storage | r, S | anon, authenticated, service_role get full table/sequence rights |
+| (global, `defaclnamespace = 0`) | f | no row yet (migration not applied locally) |
+
+The claim holds: per-schema rows are merged on top of the global row, so the global revoke cannot stop a
+`postgres`-created function in `storage` from getting EXECUTE for the API roles. `storage` is not in
+`[api] schemas` (config.toml: `public`, `graphql_public`), so such a function would not be an RPC, but it would
+be callable from SQL by API roles (e.g. from policies or other functions).
+
+### Decision on Q1: option (a), accept the `storage` exception with a rule and test T6
+
+Reasons:
+- Supabase's own storage objects are created by `supabase_storage_admin`, not `postgres`; this `postgres` row
+  only matters if *our* migrations create functions in `storage`, which convention rule 5 forbids. The risk is
+  reachable only by breaking a binding rule that code-reviewer and the gate check.
+- (b) changes a Supabase-managed default that Supabase may rely on, is outside the brief as the person answered it,
+  and is invisible to the drift check (schema `public` only), so a production mismatch would go unnoticed. A
+  control we can't observe in production is weaker than a rule plus a test we can.
+- The `storage` row also grants table and sequence rights to the API roles; (b) for functions alone would not make
+  `storage` a safe place for our objects anyway. The right answer is "our migrations stay out of `storage`".
+- (b) would need the person: it widens the scope beyond the brief. Security does not ask for it now. If a future
+  task needs objects in `storage` (e.g. storage helper functions), that task's brief must raise it with the person.
+
+Binding consequences:
+- **T6 is required** (not optional). Assert: no `pg_default_acl` row with `defaclrole = 'postgres'::regrole`,
+  `defaclobjtype = 'f'`, `defaclnamespace <> 0` and a schema other than `storage` has an `aclexplode` entry with
+  EXECUTE for grantee `0` (`PUBLIC`), `anon`, `authenticated` **or `service_role`**. `service_role` is included
+  because task 1 already revoked it in `public` and the grant convention gives it EXECUTE only per function when a
+  brief names it; a per-schema grant to it would re-open the gap silently. The exception is the schema name
+  `storage` only (exact match), not "Supabase-managed schemas" in general.
+- Code-reviewer and the gate reject any migration that creates a function in `auth`, `storage`, `realtime`,
+  `extensions`, `vault`, `graphql`, `graphql_public` or `supabase_functions`, or that adds an
+  `ALTER DEFAULT PRIVILEGES ... IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS` (schema.md rule 5 plus this line).
+- The AC8 post-deploy check (schema.md section 7, second query) records production's per-schema `postgres`
+  function rows; any row other than `public` and `storage`, or a `storage` row that differs from local, goes to
+  security before the task is marked done.
+
+### Decision on Q2: yes, T1 fails if the owner loses EXECUTE; and T1 checks the exact row
+
+T1 must assert the global `postgres` function row's ACL is **exactly** `{postgres=X/postgres}` (one entry,
+grantee `postgres`, privilege EXECUTE, grantor `postgres`), in addition to the "no `PUBLIC`/`anon`/`authenticated`"
+assertion. Reasons:
+- An owner without EXECUTE breaks `pg_cron` jobs, trigger creation and maintenance run as `postgres`; that is a
+  wrong end state and the test should say so rather than let a broken row pass.
+- An exact match also catches a global grant to any other role (`service_role`, `authenticator`, a new role),
+  which the "no PUBLIC/anon/authenticated" check alone would miss. Same expected value as the AC8 production check,
+  so test and post-deploy check prove the same thing.
+
+### Required changes to schema.md (db-architect)
+
+1. **T6:** move from "Proposed" to required, with the exact wording above (grantees `PUBLIC`, `anon`,
+   `authenticated`, `service_role`; exception exactly `storage`).
+2. **T1:** add the exact-ACL assertion (`defaclacl::text = '{postgres=X/postgres}'`, or the `aclexplode`
+   equivalent with exactly one row), on top of the existing assertions.
+3. **Procedure probe:** schema.md states that `ON FUNCTIONS` covers procedures; the test must prove it. Add a
+   probe `public.t2_probe_proc()` (`create procedure ... language sql as $$ select 1 $$`, no grant) and assert in
+   T2 that `has_function_privilege` with `'EXECUTE'` is `false` for `anon`, `authenticated`, `service_role` and
+   `true` for `postgres`. (No `call` as `anon` needed; T3 covers the behavioral case for functions.)
+
+Nothing else in schema.md needs changing. The negative control stays as written: with the global revoke undone,
+T1, T2 and T3 must fail (T6 is a per-schema guard and is expected to still pass).
