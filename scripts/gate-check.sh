@@ -127,7 +127,7 @@ if [ -n "${MB:-}" ]; then
     if [ "${FRAMEWORK_CHANGE_APPROVED:-}" != "1" ]; then
       echo "  FAIL  pipeline/framework files changed without the person's 'framework-change-approved' label:"
       printf '%s\n' "$PROTECTED" | sed 's/^/          /'; FAIL=1
-    elif ! printf '%s' "${FRAMEWORK_LABEL_TIME:-}" | grep -qE "$TIME_RE"; then
+    elif ! [[ "${FRAMEWORK_LABEL_TIME:-}" =~ $TIME_RE ]]; then  # whole value (a grep would accept any one line of a multi-line value)
       echo "  FAIL  framework-change-approved label time could not be read (FRAMEWORK_LABEL_TIME='${FRAMEWORK_LABEL_TIME:-}'), so the label can't be tied to the last protected change"; FAIL=1
     else
       # C: oldest commit of the trailing first-parent run whose net protected change equals HEAD's.
@@ -144,7 +144,7 @@ if [ -n "${MB:-}" ]; then
       [ -n "$SORTED" ] || PUSH_ERR="PR_HEAD_PUSHES is empty"
       while read -r t sha rest; do
         [ -n "$PUSH_ERR" ] && break
-        if ! printf '%s' "$t" | grep -qE "$TIME_RE" || ! printf '%s' "$sha" | grep -qiE '^[0-9a-f]{40}$' || [ -n "$rest" ]; then
+        if ! [[ "$t" =~ $TIME_RE ]] || ! [[ "$sha" =~ ^[0-9a-fA-F]{40}$ ]] || [ -n "$rest" ]; then
           PUSH_ERR="malformed line '$t $sha${rest:+ $rest}'"; break
         fi
         sha=$(printf '%s' "$sha" | tr 'A-F' 'a-f')
