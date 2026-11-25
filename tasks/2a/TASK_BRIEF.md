@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | BACKLOG |
+| State | IN_REVIEW |
 | Owner role | db-architect (spec), db-builder (migration, pgTAP test) |
 | Branch | `db/2a-function-privileges` |
 | Worktree | `../wt-2a-db-builder` |
@@ -99,6 +99,22 @@ specs/2a/**     # schema.md (db-architect), threat-model.md + security-gate.md (
 - **Verified:** read-only SELECTs on the local DB (`pg_default_acl`, `pg_proc` owners, `pg_extension`); CLI 3.2.0 `db diff --help` and the bundled pg-delta code for the drift answer. No DB writes, no reset, no cloud access.
 - **Left to do:** db-builder writes the migration and `supabase/tests/02_function_privileges_test.sql` per schema.md section 8 (T1-T6 and idempotence; the negative control is run once locally).
 - **Next role must know:** answer to the drift question above: very likely yes. pg-delta (the default engine in CLI 3.2.0) reads `defaclnamespace = 0` rows whatever `--schema` is, but no run has proven it. So AC8 also needs the read-only `pg_default_acl` check in schema.md section 7. Per security's sign-off, schema.md now matches without another security review.
+
+### db-builder, 2026-11-25
+
+- **Changed:**
+  - `supabase/migrations/20261125150215_function_privileges.sql` (new, from `npx --no-install supabase migration new function_privileges`): exactly schema.md section 1's three statements (`ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC / "anon" / "authenticated"`, no `IN SCHEMA`) plus comments. No existing migration edited. Creates no objects, no data.
+  - `supabase/tests/02_function_privileges_test.sql` (new, `plan(30)`): T1 (3: global row exists; no EXECUTE for PUBLIC/anon/authenticated; `defaclacl::text = '{postgres=X/postgres}'`), T2 (16: anon/authenticated/service_role false and postgres true on `public.t2_probe()`, `public.t2_probe_definer()`, `t2_other.t2_probe()`, procedure `public.t2_probe_proc()`), T3 (5: four `throws_ok` 42501 with the exact `permission denied for function ...` messages, then `current_user = 'postgres'`), T6 (1: no per-schema postgres function row except `storage` grants EXECUTE to PUBLIC/anon/authenticated/service_role), idempotence (2: same row count and same `defaclacl` text for every postgres default ACL row after re-running the three statements), T4 (3: explicit grant, `lives_ok` as authenticated, anon still false, `current_user = 'postgres'`). T5 = `01_default_privileges_test.sql`, unchanged, passes.
+  - One deviation in form, not in meaning: each T3 SQL string ends with `; reset role` (after the call). It only runs if a call wrongly succeeds; without it, a successful call leaves `set local role` in effect and the rest of the file runs as `anon`/`authenticated` (seen in the first negative-control run: T6 onward aborted with "permission denied to change default privileges", bad plan 25/30). See lessons L17.
+- **Verified (under the shared lock):**
+  - `npx --no-install supabase db reset`: all 3 migrations apply.
+  - `npx --no-install supabase test db`: `Files=3, Tests=45`, Result PASS (00: 3, 01: 12, 02: 30).
+  - `npx --no-install supabase db lint --level error --fail-on error`: no schema errors, exit 0.
+  - `bash scripts/verify.sh --brief tasks/2a/TASK_BRIEF.md`: **`verify.sh: PASS 17/17 (1 skipped)`** (skip: `test:e2e`, no script). The destructive scan passed (no L15 false positive; the migration has no table-emptying privilege word).
+  - **Negative control (run once, not committed):** a copy of the test in the session scratchpad with `ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" GRANT EXECUTE ON FUNCTIONS TO PUBLIC;` inserted right after `create extension` (inside the test's `begin ... rollback`, so nothing persists), run with `npx --no-install supabase test db <copy>`. Result FAIL, 21/30: **T1** tests 1 and 3 failed (row gone, `have: NULL`); **T2** all 12 API-role assertions failed; **T3** all 4 `throws_ok` failed ("caught: no exception"); idempotence (26, 27) and T4's anon check (29) failed too (expected: the re-run revoke recreates the row; anon gets EXECUTE through PUBLIC). **T6 (25) passed**, as schema.md expects. Test 2 (T1 "no forbidden entry") passes trivially when the row is missing; test 1 catches that case. Afterwards `supabase test db` again: 45/45 PASS (DB clean).
+  - Line endings: no CR in either new file.
+- **Left to do:** security gate (`specs/2a/security-gate.md`), code review (`specs/2a/review.md`), PR (git-release; not pushed by db-builder), CI green. After the person merges, AC8 (git-release post-deploy verification or the person, read-only): production migration history lists `20261125150215`; the two `SELECT`s on `pg_default_acl` in schema.md section 7 (expected: one global row `postgres | f | {postgres=X/postgres}`; per-schema rows recorded, anything other than `public` `{postgres=X/postgres}` and a `storage` row matching local goes to security); a default drift run is green (one red between merge and the integration applying the migration is expected).
+- **Next role must know:** no types to regenerate (no tables or functions). The migration name is `function_privileges` (schema.md allowed another `<what>`).
 
 ## Blocked (fill in only when BLOCKED)
 

@@ -221,3 +221,16 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **To check in step 4 (devops-cicd):** whether the `labeled` event run was created and cancelled by the
   `concurrency: ci-${{ github.ref }}` group, or never created (e.g. Actions delay). Then document the
   expected way to re-evaluate a PR after a label change.
+
+## L17. `throws_ok($q$ set local role ...; select fn() $q$)` leaks the role when the call succeeds (open)
+
+- **Seen:** task 2a negative control. The T3 pattern from `specs/2a/schema.md` and the threat model
+  (`set local role anon; select public.t2_probe()` inside `throws_ok`) works when the call fails (the
+  subtransaction rollback undoes the role switch), but when the call wrongly succeeds the subtransaction
+  commits and `set local role` stays. The rest of the file then ran as `authenticated`: the next statement
+  failed ("permission denied to change default privileges") and pgTAP reported a bad plan (25/30), so later
+  assertions (T6, idempotence, T4) never ran.
+- **Fix used:** end the SQL string with `; reset role` (runs only if the call succeeds). `lives_ok` strings need it
+  too. The test still asserts `current_user = 'postgres'` afterwards.
+- **Fix to the framework (suggested, db-architect/security):** write the pattern with the trailing `reset role`
+  in schema.md convention rule 5.2 and the threat-model template, so later function migrations copy the safe form.
