@@ -274,6 +274,42 @@ Question 2 is for the person to decide. Nothing was built. Sources: `node_module
 
 **Recommendation: Option A (route handlers).** Every API AC is written as an HTTP status, and with route handlers each one maps directly to a status and our error format. qa-test can call them with plain `fetch` in the abuse suite, and the one CSRF control we add is a small function with its own test. Option B would mean rewording those ACs and calling per-build action ids in abuse tests.
 
+### devops-cicd, 2026-11-25 (branch `ci/3-todos-tooling`)
+
+- **Changed:**
+  - `package.json` / `package-lock.json` (one lockfile change for all builders; exact versions, current stable from `npm view` on 2026-11-25): `dependencies` `@supabase/supabase-js` 2.119.2, `@supabase/ssr` 0.12.7 (peer `@supabase/supabase-js ^2.114.0`, satisfied), `zod` 4.6.7; `devDependencies` `@playwright/test` 1.65.1 (brings `playwright`/`playwright-core` 1.65.1). Scripts: `"test": "vitest run"` (`--passWithNoTests` removed, L5: tests exist), `"test:e2e": "playwright test"` (new).
+  - `vitest.config.ts` (new): Vitest excludes `tests/e2e/**`, `.next/**`, `playwright-report/**`, `test-results/**` on top of its defaults, so Playwright files never run under Vitest.
+  - `next.config.ts`: CSP entry and its builder (`isDev`, `supabaseOrigin()`) removed (the nonce CSP moves to `proxy.ts` + `lib/server/csp.ts`, backend-dev, threat model 6.1); the other five headers unchanged byte for byte on `source: "/(.*)"`; `cacheComponents: false`; `partialPrefetching` removed (6.5).
+  - `.github/workflows/ci.yml`, `verify` job only (framework path: **the PR needs the person's `framework-change-approved` label**): new steps before `verify.sh`: install Playwright Chromium (`npx --no-install playwright install --with-deps chromium`, version from the lockfile), `npx --no-install supabase start`, then export `NEXT_PUBLIC_SUPABASE_URL` (from `API_URL`), `NEXT_PUBLIC_SUPABASE_ANON_KEY` (from `ANON_KEY`) and `MAILPIT_URL` (from `MAILPIT_URL`) read from `npx supabase status -o env` at run time, each `::add-mask::`ed and written only to `$GITHUB_ENV`. verify.sh then finds the stack running, skips its own start and resets/tests/lints the DB as before; `npm test`, `test:e2e` and `build` see the env. `scripts/verify.sh` is unchanged (outside this task's allowed paths). Job names `verify`, `db-check`, `secrets` unchanged.
+- **Proposed env var names (the person approves for PROJECT_CONTEXT; no values anywhere):** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (already listed), plus `MAILPIT_URL` (tests only: local Mailpit for reading sign-in codes). If qa-test needs to check rows as `postgres` through a DB URL, ask devops-cicd to export one more name (proposed `LOCAL_DB_URL` from `DB_URL`); it is not exported now.
+- **Local equivalent (builders, Git Bash, stack already running; values stay in the shell, never in a file):**
+  ```
+  eval "$(npx supabase status -o env | sed -nE 's/^API_URL=/export NEXT_PUBLIC_SUPABASE_URL=/p; s/^ANON_KEY=/export NEXT_PUBLIC_SUPABASE_ANON_KEY=/p; s/^MAILPIT_URL=/export MAILPIT_URL=/p')"
+  npx playwright install chromium   # once per machine
+  npm test && npm run test:e2e
+  ```
+  Don't `echo` the values and don't write them to `.env.local` in a commit.
+- **Verified:** `bash scripts/verify.sh --no-db` (DB not run: the shared local stack was in use by db-builder): `verify.sh: FAIL 2/15 failed: npm run test, npm run test:e2e (1 skipped)`. typecheck, lint, build, scope, secrets, migrations PASS. Both failures are expected on this branch alone:
+  - `npm run test`: 14 tests in `tests/integration/security-headers.test.ts` fail only because they expect the old CSP in `next.config.ts` and `cacheComponents`/`partialPrefetching: true`: `H1: exactly one rule covers all paths and it carries exactly the six headers`, `H2: Content-Security-Policy (production, local API URL) equals the threat model string exactly`, `H3: production CSP has no 'unsafe-eval', ...`, `H4: with NODE_ENV=development only script-src changes, adding 'unsafe-eval'`, `H4: 'unsafe-eval' is absent when NODE_ENV=production`, `H4: ... NODE_ENV=test`, `H5` (unset, empty), `H6: a URL with a path, query and an injected directive yields the origin only`, `H6: NEXT_PUBLIC_SUPABASE_URL=... fails closed` x4 (`javascript:`, `ftp:`, `not a url`, `data:`), `AC1: the existing options cacheComponents and partialPrefetching stay on`. Still passing: `H2: %s equals %j exactly` for all five other headers, `H1/AC2` source matches, all of `auth-config.test.ts`.
+  - `npm run test:e2e`: fails because `playwright.config.*` (qa-test) doesn't exist yet, so Playwright defaults to the repo root and loads the Vitest files. Passes once qa-test's config sets `testDir: "tests/e2e"`.
+  - Parsing of `supabase status -o env` checked against the running local stack (names and value shapes only, nothing printed): URL and Mailpit URL are `http://127.0.0.1:<port>`, key present, no quotes or CR.
+  - `next build` route table on this branch: `○ /`, `○ /_not-found` (static) until frontend-dev makes the root layout dynamic (6.5 step 2).
+- **qa-test must know:** update the 14 header tests above to N3 (no CSP in `headers()`, five headers exact, `cacheComponents === false`, no `partialPrefetching`) and move H2-H6 to `buildCsp` (N1). `playwright.config.ts` must set `testDir: "tests/e2e"` and a `webServer` that runs `npm run build && npm start` (verify.sh runs `test:e2e` **before** `build`; the CSP ACs need a production build), and read `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `MAILPIT_URL` from the environment (fail with a clear message if unset). Chromium only. Name e2e files anything; Vitest ignores `tests/e2e/**`. `eslint.config.mjs` doesn't ignore `playwright-report/**` / `test-results/**` (outside this task's allowed paths); if a local re-run of lint after e2e trips on them, delete the folders or ask for a follow-up.
+- **backend-dev must know:** `next.config.ts` no longer sets any CSP; `proxy.ts` must set exactly one on every non-static response (6.3/6.4). `NEXT_PUBLIC_SUPABASE_URL` is set in CI before `next build`. `zod` is v4 (`z.strictObject`, `z.uuid()` exist in v4).
+- **frontend-dev must know:** `cacheComponents` is off, so `use cache`/`cacheLife` aren't available; make the root layout dynamic (6.5 step 2).
+
+#### Production checklist for the person (replaces 2b dashboard checklist item 22's 10-attempt loop; from `specs/3/threat-model.md` 4.5; agents never run these)
+
+Record each result in `tasks/decisions.md`. Keys only in a shell variable, never pasted anywhere.
+
+- [ ] **P1-revised (row 9; blocking before real users).** After the first production deploy and with the verify rate limit at 5 per 5 minutes (dashboard: Authentication > Rate Limits): from one machine, send **35** wrong-code `POST /auth/v1/verify` requests back to back (same command as `specs/2b/security-gate.md` P1, loop to 35, anon key in a shell variable). Record every status code. Wait 65 seconds, send 2 more, record both.
+  - **Pass:** first 429 at or before attempt 6, every later attempt 429, never a 200.
+  - **Burst-bound (expected):** first 429 between attempts 7 and 31, every later one 429, never a 200; after the wait at most 1 non-429, then 429. Row 9 not proven: release stays blocked until you record one of (a) Supabase lowers the verify burst and a re-run passes; (b) raise `otp_length` to 8 (dashboard + `config.toml` + S8 + the "6-digit" AC texts), security's recommendation; (c) an explicit risk acceptance with the numbers in threat model 4.2.
+  - **Fail:** no 429 by attempt 31, or any 200: stop, row 9 FAIL in production, tell security.
+- [ ] **P2 (blocking before real users).** One signed-in test user makes 60 to-do API calls (list/toggle) within 3 minutes through the deployed app. Pass: no 401 and no 429. Fail: tell security (design change, not higher limits).
+- [ ] Still blocking (AC46): item 1 (custom SMTP), item 21 (site URL / redirect URLs once a host exists), item 9 + task 3b (Turnstile), production email templates show `{{ .Token }}`. Leave Auth IP forwarding off; no secret API key for this task.
+- P3 (info only): server-side session refresh shares one bucket; revisit near ~1,000 active users/hour.
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
