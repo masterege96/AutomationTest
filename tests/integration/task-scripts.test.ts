@@ -465,7 +465,9 @@ describe("frozen archives and docs (static, git)", () => {
 
   it("AC13: outside tasks/ and specs/, the archive files are only cited or described as frozen; no tasks/board.md", () => {
     // This file is excluded: it names the paths it checks for.
-    const g = git(["grep", "-n", "-E", "tasks/(board|lessons|decisions)\\.md", "--", ":!tasks/", ":!specs/", ":(exclude)tests/integration/task-scripts.test.ts"]);
+    // gate-check.sh and its tests are excluded too: they guard the frozen archive as a decision file (task 4b S5), not an instruction to write to it.
+    const g = git(["grep", "-n", "-E", "tasks/(board|lessons|decisions)\\.md", "--", ":!tasks/", ":!specs/", ":(exclude)tests/integration/task-scripts.test.ts",
+      ":(exclude)scripts/gate-check.sh", ":(exclude)tests/integration/gate-check.test.ts"]);
     expect(g.code === 0 || g.code === 1, g.stderr).toBe(true);
     const hits = lines(g.stdout);
     expect(hits.filter((l) => l.includes("tasks/board.md"))).toEqual([]);
