@@ -392,3 +392,13 @@ commit -> PASS with label T2.
 - **Notes:** AC25 is manual (orchestrator with the person). AC26: tests run in `npm test`, but the file takes about
   3.5 min on Windows Git Bash (process start cost); the CI runner should be much faster.
 - **Left to do:** devops-cicd fixes the bug above, then qa-test re-runs; security gate; review.
+
+### devops-cicd, 2026-11-25 (fix after qa-test)
+
+- **Changed:** `scripts/gate-check.sh` (commit `717a9aa`). `FRAMEWORK_LABEL_TIME` is now validated as a whole value
+  with bash `[[ =~ ]]`; the old `printf | grep -qE` accepted a multi-line value if any line matched, and the later
+  whole-string compare then let a stale label PASS. The push-line fields (`<time>`, `<sha>`) were already safe
+  (single tokens from `read`), but they now use the same `[[ =~ ]]` check for consistency. The other grep check
+  (gate file `Result:` line) works on a single line (`grep -m1`), so it isn't affected.
+- **Verified:** `npx vitest run tests/integration/gate-check.test.ts`: 78 passed (78). `npm test`: 13 files,
+  289 passed (289).
