@@ -39,7 +39,7 @@ Proposals for `rules/security-baseline.md` go to the person; it doesn't edit rul
 ## Rules
 1. **Fail closed.** If a required abuse test is missing, the gate is `FAIL`, even if the code looks right.
 2. Each FAIL names the baseline row, the file, and the owning role. The task goes back to that role.
-3. A high or critical dependency vulnerability is a FAIL unless the person accepts it in `tasks/decisions.md`.
+3. A high or critical dependency vulnerability is a FAIL unless the person accepts it in a decision file in `tasks/decisions/` (ORCHESTRATOR.md section 7).
 4. Only the person can override a FAIL.
 5. Secret exposed → stop rule 2: everything stops, the person rotates, security confirms the old key is dead.
 

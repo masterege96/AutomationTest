@@ -3,8 +3,8 @@
 Every agent reads this file before doing anything, whatever its role.
 Role contracts in `roles/` add to these rules; they never relax them.
 If a role contract and this file disagree, this file wins. If this file and
-the person disagree, the person wins, and the agent writes the decision into
-`tasks/decisions.md`.
+the person disagree, the person wins, and the agent records the decision as a
+new file in `tasks/decisions/` (`<YYYY-MM-DD>-<task-id>-<slug>.md`, ORCHESTRATOR.md section 7).
 
 ## 1. Before you start
 
@@ -52,7 +52,7 @@ the person disagree, the person wins, and the agent writes the decision into
 
 24. Finish every task by updating the task brief's **Handoff** section: what you changed (files), what you verified (commands and results), what's left, and anything the next role must know.
 25. Assume the next agent has no memory of your conversation. If it isn't in the repo or the task brief, it's lost.
-26. Write failures down. If you hit a convention you had to guess, a rule that was unclear, or a check that missed a bug, add it to `tasks/lessons.md`. That file is how the framework gets fixed.
+26. Write failures down. If you hit a convention you had to guess, a rule that was unclear, or a check that missed a bug, add it to your task's `tasks/<id>/lessons.md` as `## L<id>.<n>. <title> (open)`, with the next free `<n>` (ORCHESTRATOR.md section 8). These files are how the framework gets fixed; `tasks/lessons.md` is the frozen archive of L1-L27.
 
 ## 8. When in doubt
 
