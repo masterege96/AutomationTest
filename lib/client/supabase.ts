@@ -1,5 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
-import { cookieOptions } from "@/lib/client/cookie-options";
+import { cookieOptionsFor } from "@/lib/client/cookie-options";
 
 // Browser Supabase client (anon key only). Used for sign-in (signInWithOtp, verifyOtp) and sign-out,
 // called from the browser so Supabase's per-IP auth limits see the user's own IP
@@ -11,5 +11,5 @@ export function getSupabaseBrowserClient() {
   if (!url || !anonKey) {
     throw new Error("Supabase is not configured.");
   }
-  return createBrowserClient(url, anonKey, { cookieOptions });
+  return createBrowserClient(url, anonKey, { cookieOptions: cookieOptionsFor(window.location.hostname) });
 }
