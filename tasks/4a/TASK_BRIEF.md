@@ -149,3 +149,53 @@ a template, it stops and asks (`BLOCKED`) rather than widening the scope.
   the field names of the choices file with the same format (content unchanged).
 - **Questions 1-3:** go with the defaults (`Closes:` lines; 4a closes L16; State notes copied as they are).
 - **3c:** PR #15 merged at 19:08 UTC (docs only, nothing left open); set its brief State to `DONE` in the migration.
+
+### devops-cicd, 2026-11-25 (build)
+
+- **Changed:**
+  - New: `scripts/board.sh`, `scripts/lessons.sh` (mode 100755; `set -uo pipefail`, bash + awk/sed/sort/cut, `LC_ALL=C`;
+    text parsing only, no `eval`/`source`), `tasks/4a/lessons.md` (`Closes: L16, L19, L23`),
+    `tasks/decisions/2026-11-25-4a-step-4-go-ahead.md` (AC11).
+  - State migration (AC5): State rows of 2a, 2c, 2d, 2e -> `DONE`; 2b and 3 -> `VERIFYING (the person: ...)` with
+    board.md's notes; 0 and 1 already matched. Commit d669cf4 copies board.md word for word (3c `IN_REVIEW`); the next
+    commit 55c6102 sets 3c to `DONE` per the orchestrator's input above. `tasks/board.md` deleted.
+  - One header line each in `tasks/lessons.md` and `tasks/decisions.md` (AC10); `2026-11-25-4-step4-choices.md`: the
+    Who field split into Who (the person's words) and Source, content unchanged.
+  - Docs (framework text, needs the person's label): ORCHESTRATOR.md sections 3 (State row paragraph), 3a (conflicting-PR
+    paragraph, AC14), 7 (file tree + how to read), 8 (learning loop, close rule); AGENT_RULES intro and rule 26;
+    roles/git-release.md (Owns without `tasks/board.md`; rule 3 now says *merge* `main` into the branch instead of
+    "rebase", since a rebase of a pushed branch needs a force-push, plus the AC14 text); roles/product-spec.md (Owns);
+    roles/security.md rule 3; roles/README.md (two ownership rows).
+- **Verified:**
+  - `bash scripts/board.sh` on the branch: header + 10 rows (0, 1, 2a, 2b, 2c, 2d, 2e, 3, 3c, 4a), exit 0, no stderr.
+    Ids and states equal board.md at 5c3aa7e (checked with a diff of id|state pairs) except 3c `DONE` (orchestrator
+    move) and the extra `4a | ... | SPEC_READY`.
+  - `bash scripts/lessons.sh` on the branch: L5, L11, L12, L13, L14, L15, L17, L20, L21, L22, L24, L25, L26, L27, then
+    `lessons.sh: 14 open (14 archive, 0 per-task)`, exit 0.
+  - Hand-run on a scratch fixture: board order `0, 2, 2b, 3c, 10`, dirs without a brief skipped, missing/empty/unknown
+    State and bad heading each give one stderr line and exit 1, an argument gives usage + exit 2, no `tasks/` exit 2,
+    empty `tasks/` prints the two header lines, exit 0; lessons.sh wrong task id, `.0`, `.a`, duplicate and unknown
+    `Closes:` id each give one stderr line, exit 1, the well-formed open lessons still listed.
+  - `git grep -n -E 'tasks/(board|lessons|decisions)\.md' -- ':!tasks/' ':!specs/'`: only citations of archived
+    entries (ORCHESTRATOR.md L11/L19/L16/L22, PROJECT_CONTEXT.md, git-release rule 3), "frozen archive" descriptions
+    (AGENT_RULES 26, ORCHESTRATOR section 8) and lessons.sh reading the archive; no `tasks/board.md`. Templates have no
+    mention (checked), so `templates/**` untouched.
+  - `bash scripts/verify.sh --no-db`: `verify.sh: FAIL 1/15 failed: npm run test:e2e (1 skipped)`. Scope, typecheck,
+    lint, `npm test`, build PASS; `test:e2e` fails only because the local-stack env vars aren't set (I was told not to
+    start/reset the shared local stack). The full `verify.sh` for AC15 must run where the stack env is exported (or in CI).
+- **Left to do:** qa-test: tests for AC1-AC9 in `tests/integration/**`. Then security gate, review, the person's label.
+  The orchestrator moves 4a's own State (still `SPEC_READY`; I didn't move it).
+- **Next role must know:**
+  - Behaviour choices inside the ACs: titles and State cells are printed raw (a `|` in a title is not escaped);
+    a missing `Owner role` row prints an empty cell and is not an error; ids without a leading number sort last;
+    the State word is the text before the first space or `(`. lessons.sh: `Closes:` may have leading whitespace; an
+    empty `Closes:` line is a problem; a per-task heading `## L<tok>. ` without a dot in `<tok>` (e.g. `## L28. `) is
+    reported; a duplicate keeps the first; archive duplicates/odd headings are not checked (frozen file).
+  - Exact stderr texts: `board.sh: <file>: no '| State |' row`, `... State cell is empty`,
+    `... State '<cell>' doesn't start with one of: BACKLOG ... BLOCKED (ORCHESTRATOR.md section 3)`,
+    `... first line is not '# Task <id>: <title>'`; `lessons.sh: <file>: heading L5y.1 has the wrong task id (expected
+    L5x.<n>)`, `... heading L5x.0 has a bad number (expected a positive integer)`, `... duplicate id L5x.2`,
+    `... Closes: names L99, which is no lesson`. Tests should match on the problem, not the full wording, if the text may
+    still change in review.
+  - Both scripts need bash 4+ (`[[ =~ ]]`, arrays); Git Bash 5.2 and ubuntu bash 5 are fine. Invoke Git Bash on
+    Windows (not WSL), write fixtures with LF (the scripts also strip CR).
