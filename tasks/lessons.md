@@ -187,3 +187,14 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   Nothing was changed in production.
 - **Note (AGENT_RULES 13):** the Supabase connector on this machine also exposes write tools
   (`execute_sql`, `apply_migration`). They were not used and must never be used against production.
+
+## L15. verify.sh flags privilege names as destructive SQL (open, the person decides)
+
+- **Seen:** task 1, `verify.sh --brief tasks/1/TASK_BRIEF.md`:
+  `FAIL  destructive statements need approval` on every `GRANT/REVOKE ... TRUNCATE ...` line (and on a comment line).
+- **Cause:** the destructive scan matches the bare word `truncate`, so the privilege name in `GRANT`/`REVOKE`
+  (and comments) counts as `TRUNCATE TABLE`. Task 1 drops nothing and touches no data.
+- **Options (the person):** (a) add `destructive-approved` to the PR as a reviewed override for this one
+  false positive; or (b) approve a framework fix first (framework-change-approved): skip lines starting
+  with `--`, and match `truncate` only as a statement (`^\s*truncate\b` or `;\s*truncate\b`), not inside
+  `GRANT`/`REVOKE` lists. Owner: devops-cicd.
