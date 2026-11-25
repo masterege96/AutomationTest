@@ -9,8 +9,9 @@ conventions. If something isn't here or in the repo, agents must ask, not guess.
 - **What it does (2 sentences):** Pilot app for the agent team framework: a to-do app with login, built on Next.js and Supabase. Each signed-in user can create, view, complete and delete only their own to-dos.
 - **Hosting type:** Supabase-hosted
 - **Repo URL:** https://github.com/masterege96/AutomationTest
+- **Supabase project:** AutomationTests (region: Europe). The project ref, keys and passwords are never written in files; CI reads them from the GitHub Environment `production` (main only).
 - **Production URL:** not decided yet (app hosting not chosen; the person decides)
-- **Deploy path:** Supabase GitHub integration / CI job (`supabase db push`)
+- **Deploy path:** Supabase GitHub integration
 
 ## Stack and pinned versions
 
@@ -78,9 +79,9 @@ path may belong to two roles.
 | `NEXT_PUBLIC_SUPABASE_URL` | client | hosting provider |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client | hosting provider |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | hosting provider, GitHub Secrets |
-| `SUPABASE_ACCESS_TOKEN` | CI only (drift check) | GitHub Secrets (not added yet) |
-| `SUPABASE_DB_PASSWORD` | CI only (drift check) | GitHub Secrets (not added yet) |
-| `SUPABASE_PROJECT_ID` | CI only (drift check) | GitHub Secrets or variable (not added yet) |
+| `SUPABASE_ACCESS_TOKEN` | CI only (drift check) | GitHub Environment `production` secret (main only) |
+| `SUPABASE_DB_PASSWORD` | CI only (drift check) | GitHub Environment `production` secret (main only) |
+| `SUPABASE_PROJECT_ID` | CI only (drift check) | GitHub Environment `production` secret (main only) |
 
 ## Security baseline: rows that don't apply
 
@@ -100,6 +101,6 @@ with login). **security** must confirm in the first threat model.
 
 ## Hard constraints
 
-- No Supabase cloud project, GitHub integration or secrets until the person decides (Phase 0 stop).
+- The Supabase project AutomationTests and its GitHub integration were connected by the person on 2026-11-25. Agents never write to production (AGENT_RULES §4); every merge to `main` deploys migrations, so open merge-gate risks (tasks/lessons.md L11) need the person's decision before the first real table.
 - No new paid services, tools or major dependencies without the person's approval.
 - Production changes only via migrations merged to `main` and applied by automation.

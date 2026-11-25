@@ -38,6 +38,7 @@ the person disagree, the person wins, and the agent writes the decision into
 16. One task, one branch, one PR. Branch names: `<type>/<task-id>-<short-name>` (types: `feat`, `fix`, `chore`, `db`, `ci`, `sec`, `test`).
 17. Commit messages follow Conventional Commits (`feat:`, `fix:`, `db:` ...). Small, focused commits.
 18. Never force-push to a shared branch, rewrite `main`, skip hooks (`--no-verify`) or disable a CI check.
+18a. Never add the `framework-change-approved` or `destructive-approved` labels, and never change branch protection or repo settings. Only the person does those.
 19. Never edit a migration that has been merged. Fix it with a new migration.
 
 ## 6. Done means proven

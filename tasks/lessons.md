@@ -129,3 +129,29 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   `Result: APPROVE`, both committed after the last code change. ci.yml has a `gate` job; branch protection
   requires `verify`, `db-check`, `secrets`, `gate`. ORCHESTRATOR.md "Merge approval", roles/security.md,
   roles/code-reviewer.md, roles/git-release.md and roles/devops-cicd.md updated. Recorded in tasks/decisions.md.
+
+## L11. Merge-gate residual risks from the PR #2 security gate (open)
+
+- **Fixed in PR #2 after the first security FAIL (F1):** gate.yml always judges against `origin/main`,
+  fails for any other base, and re-runs on `edited` (retargeted base). Also fixed: S17 (gate judges the
+  reported `head.sha`, concurrency group), S18 (drift log shows only a line count and hash, not the diff).
+- **Open (devops-cicd; the person decides):**
+  - S14: a PR can add its own `pull_request` job named `merge-gate`. Suggested: gate-check FAILs when a
+    workflow at the PR head defines a job named `merge-gate`/`gate`, or the person accepts the risk.
+  - S5: a `tasks/**`-only PR (including `tasks/decisions.md`) passes with stale gate files. Suggested:
+    protect `tasks/decisions.md`, and require gate commits in `MB..HEAD` even when there's no code change.
+  - S15: protected-path list misses `.gitleaks.toml`, the rest of `.github/**`, `package.json`, lockfile,
+    `supabase/config.toml`, `templates/`, `AGENTS.md`.
+  - S16: the `framework-change-approved` label isn't tied to a commit (pushes after labeling still pass).
+  - S19: bootstrap-check should verify the `production` environment exists with a main-only policy and
+    that no repo-level `SUPABASE_*` secrets exist.
+  - S20/S21 (the person): roles/git-release.md "Owns ... branch protection, labels, merge settings"
+    contradicts AGENT_RULES 18a.
+- **Added from security passes 2 and 3 (open):**
+  - S14 second variant: open a PR against a branch whose own `gate.yml` always passes
+    (`pull_request_target` runs the base branch's workflow), then retarget to `main` and re-run the old green
+    run. A full fix needs a check source workflows can't imitate (GitHub App / org-level required workflow).
+    With the Supabase integration on, a spoofed merge is a path to a production write: decide before the first real table.
+  - S26: an odd diff count in drift.yml is reported as `drift=yes` (opens a drift issue, stop rule 1) when
+    the check itself broke. Fix: non-numeric → exit 1 without `drift=yes`.
+  - S27: drift.yml comment about adding a post-deploy trigger "once the deploy path exists" is now due.

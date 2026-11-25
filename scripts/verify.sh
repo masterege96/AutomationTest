@@ -152,10 +152,11 @@ TRACKED_ENV=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.examp
 [ -z "$TRACKED_ENV" ] && ok "no .env files tracked" || bad ".env file tracked: $TRACKED_ENV" "STOP. Secret exposed: tell the person to rotate keys. Don't rewrite history yourself."
 
 if command -v gitleaks >/dev/null 2>&1; then
-  GL_OUT=$(gitleaks detect --no-banner --redact --log-level error 2>&1); GL_RC=$?
+  # --exit-code 99: gitleaks exits 1 on its own errors too, so 99 means "leaks found" only.
+  GL_OUT=$(gitleaks detect --no-banner --redact --log-level error --exit-code 99 2>&1); GL_RC=$?
   case "$GL_RC" in
     0) ok "gitleaks: no secrets in repo history" ;;
-    1) bad "gitleaks found secrets" "$(printf '%s\n' "$GL_OUT" | tail -20)"$'\n'"STOP and tell the person. Don't rewrite history yourself." ;;
+    99) bad "gitleaks found secrets" "$(printf '%s\n' "$GL_OUT" | tail -20)"$'\n'"STOP and tell the person. Don't rewrite history yourself." ;;
     *) bad "gitleaks could not run (exit $GL_RC)" "$GL_OUT" ;;
   esac
 else

@@ -17,12 +17,12 @@ can gate every later task. No app features.
 
 - [ ] AC1: `.gitattributes` (`* text=auto eol=lf`) and `.gitignore` (`.env*`, `!.env.example`) are the first commit.
 - [ ] AC2: Next.js + TypeScript (App Router) scaffold and `supabase init` are committed; framework `scripts/`, `rules/`, `roles/`, `templates/`, `ORCHESTRATOR.md` are copied in.
-- [ ] AC3: `PROJECT_CONTEXT.md` is filled in (hosting type Supabase-hosted; "Deploy path" line left as in the template).
+- [ ] AC3: `PROJECT_CONTEXT.md` is filled in (hosting type Supabase-hosted; "Deploy path" set to `Supabase GitHub integration` once the person connected it, 2026-11-25).
 - [ ] AC4: Versions pinned: `.nvmrc`, `engines`, `packageManager`, exact Supabase CLI devDependency, committed lockfile; npm scripts `typecheck`, `lint`, `test`, `build`.
-- [ ] AC5: `.github/pull_request_template.md`, `CHANGELOG.md` (0.1.0), `ci.yml` (`verify`, `db-check`, `secrets`) and `drift.yml` (nightly, read-only) exist; every action and tool version pinned.
+- [ ] AC5: `.github/pull_request_template.md`, `CHANGELOG.md` (0.1.0), `ci.yml` (`verify`, `db-check`, `secrets`), `gate.yml` (`merge-gate`, `pull_request_target` from main) and `drift.yml` (nightly, read-only, `environment: production`) exist; every action and tool version pinned. (Updated 2026-11-25 after the L10 decision.)
 - [ ] AC6: First migration (`init`, no schema changes) and a first pgTAP test in `supabase/tests`.
 - [ ] AC7: `verify.sh --brief tasks/0/TASK_BRIEF.md` passes locally with Docker.
-- [ ] AC8: `main` pushed and protected (PR, 1 review, required checks `verify`, `db-check`, `secrets`, no force-push); labels `destructive-approved`, `security`, `db`, `blocked` exist.
+- [ ] AC8: `main` pushed and protected (PR required, 0 approvals, required checks `verify`, `db-check`, `secrets`, `merge-gate`, bypass not allowed, no force-push); labels `destructive-approved`, `framework-change-approved`, `security`, `db`, `blocked`, `drift` exist. (Updated 2026-11-25 after the L10 decision.)
 
 ## Security rows that apply
 
@@ -88,7 +88,14 @@ supabase/tests/*
 - **Left to do:** the person: connect the deploy path (Supabase project + GitHub integration), add drift secrets, run drift once, fix L1/L2/L3/L8 in verify.sh, decide L10 (review vs. single account). Then a throwaway PR proving a red run (planted CR).
 - **Next role must know:** use `npx supabase` (pinned CLI). `--passWithNoTests` must go when the first unit test lands (L5). Branch `ci/0-phase0-fixes` holds the CI-trigger fix and this handoff; it needs a PR.
 
+### git-release + devops-cicd, 2026-11-25 (PR #1 merged, PR #2 gate hardening)
+
+- **Changed:** PR #1 (squash 35a461c): verify.sh fixes L1/L2/L3/L8, bootstrap-check npm-scripts check, `scripts/gate-check.sh` + `gate` job, CI on PRs only, framework docs (L6, L10). PR #2 (`ci/0-gate-hardening`): `gate.yml` `merge-gate` on `pull_request_target` (S1), gate-check reads the PR head with git only, first-line Result (S4), fails without a merge-base (R2), `framework-change-approved` label for pipeline/framework files; old `gate` job kept in ci.yml for PR #2 only, checking out the PR head (R1); verify.sh gitleaks `--exit-code 99` (R3); drift.yml step-level secrets, `persist-credentials: false`, `environment: production`, issue links the run instead of pasting the diff (S6, S8); AGENT_RULES 18a; ORCHESTRATOR 3a; role docs; this brief and decisions (R4-R6).
+- **Verified:** PR #1: deliberate red run 45600953422 (verify + db-check FAIL on a planted CR), green run 45604400447 (verify, db-check, secrets, gate PASS). Security gate PASS, review APPROVE. PR #2: see its gate reports and CI.
+- **Left to do:** the items under Blocked. After PR #2 merges: a tiny PR removing the temporary `gate` job from ci.yml. Open should-fix findings from the PR #1 gates (S3, S5, S7, S9-S13) need tasks.
+- **Next role must know:** pipeline/framework changes need the person's `framework-change-approved` label; agents never add it (AGENT_RULES 18a).
+
 ## Blocked (fill in only when BLOCKED)
 
-- **Missing:** deploy path (Supabase cloud project + GitHub integration), drift secrets `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`; verify.sh fixes L1, L8; reviewer decision L10
+- **Missing:** (1) done by the person 2026-11-25: Supabase project AutomationTests + GitHub integration, `production` environment with the drift secrets; (2) one green drift run on main (git-release, after PR #2 merges); (3) the person: branch protection required check `merge-gate`, bypass not allowed; (4) the person: `framework-change-approved` label on PR #2; (5) the person: decide the open merge-gate risks in tasks/lessons.md L11 before the first real table.
 - **Who must provide it:** the person
