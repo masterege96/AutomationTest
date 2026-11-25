@@ -3,10 +3,13 @@
 # for single-account repos. A PR can only merge when the task's gate files say so.
 #
 # Passes only if, for the task named by the branch (<type>/<id>-<name>):
-#   specs/<id>/security-gate.md  has a line "Result: PASS"
-#   specs/<id>/review.md         has a line "Result: APPROVE"
-# and both files were committed AFTER (in a later commit than) the last code change
-# (so a review can't approve code that changed afterwards).
+#   the FIRST non-empty line of specs/<id>/security-gate.md is "Result: PASS"
+#   the FIRST non-empty line of specs/<id>/review.md         is "Result: APPROVE"
+#   both files were committed AFTER (in a later commit than) the last code change
+#   (so a review can't approve code that changed afterwards); no merge-base with
+#   the base branch is a FAIL
+#   changes to .github/workflows, scripts, rules, roles or ORCHESTRATOR.md carry the
+#   person's framework-change-approved label (FRAMEWORK_CHANGE_APPROVED=1)
 #
 # Usage: scripts/gate-check.sh [--base <branch>] [--head <sha>] [--branch <name>]
 #

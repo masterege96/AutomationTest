@@ -45,7 +45,7 @@ postcss.config.*
    - `verify`: install with the lockfile, run `scripts/verify.sh` with `CI=true`; sets `DESTRUCTIVE_APPROVED=1` only when the PR has the `destructive-approved` label.
    - `db-check`: `supabase start`, `supabase db reset`, `supabase test db`, `supabase db lint` (also run inside verify.sh; this job is the explicit required check).
    - `secrets`: gitleaks on the full history.
-   - `merge-gate` (in `gate.yml`, on `pull_request_target`): runs `scripts/gate-check.sh` from `main` and only reads the PR head with git (`--head refs/pr/head`), never checks it out or runs it. Merge approval from `specs/<id>/security-gate.md` and `review.md`, plus the `framework-change-approved` label for pipeline/framework files (ORCHESTRATOR.md "Merge approval").
+   - `merge-gate` (in `gate.yml`, on `pull_request_target`): runs `scripts/gate-check.sh` from `main` and only reads the PR head with git (fetched to `refs/pr/head`, checked against and passed as `--head "$HEAD_SHA"`), never checks it out or runs it. Merge approval from `specs/<id>/security-gate.md` and `review.md`, plus the `framework-change-approved` label for pipeline/framework files (ORCHESTRATOR.md "Merge approval").
 4. **Deploy** on push to `main`, from the same commit:
    - Supabase-hosted: GitHub integration "Deploy to production" ON for `main`, written in `PROJECT_CONTEXT.md` as `Deploy path: Supabase GitHub integration`.
    - Self-hosted / plain Postgres: `db push --dry-run` (logged), backup (`pg_dump`, stored off-server), `db push`, then app deploy. GitHub Environment `production` with required approval.
