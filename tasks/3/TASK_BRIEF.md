@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | VERIFYING |
 | Owner role | db-architect (`specs/3/schema.md`), security (`specs/3/threat-model.md`, `specs/3/security-gate.md`), db-builder (DB), backend-dev (API, server auth, nonce CSP proxy), frontend-dev (UI), qa-test (tests, `specs/3/test-plan.md`), devops-cicd (scripts, devDependencies, lockfile, `next.config.*` headers block, CI), code-reviewer (`specs/3/review.md`) |
 | Branch | `feat/3-todos` |
 | Worktree | integration `../wt-3-todos` (`feat/3-todos`); builders: `../wt-3-db-builder` (`db/3-todos-schema`), `../wt-3-devops-cicd` (`ci/3-todos-tooling`), then `../wt-3-backend-dev`, `../wt-3-frontend-dev`, `../wt-3-qa-test`; each merged into `feat/3-todos` by the orchestrator |
@@ -450,3 +450,35 @@ Branch `test/3-todos-tests` fast-forwarded to the integrated `4469360`, plus `31
   burst: (a) / (b) 8-digit codes / (c) accept), P2, P4 (once a host is chosen), SMTP (item 1), URLs (item 21), Turnstile
   (item 9, task 3b) and production email templates with `{{ .Token }}` in `tasks/decisions.md`.
 - **Needs the person:** the `framework-change-approved` label (`.github/workflows/ci.yml`).
+
+### orchestrator, 2026-11-25 (merged; release checklist for the person)
+
+PR #14 squash-merged as `89b1c2e` (18:42:59 UTC); migration `20261125165117 create_todos` is in production history and the
+drift check is green (`specs/3/post-deploy.md`). Task 3 is `VERIFYING`. **No real user signs in until every item below
+is recorded in `tasks/decisions.md`** (AC46). Agents never change production; each item is the person's.
+
+- [ ] **R1 Hosting:** choose the app host; set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in its
+      **build** environment (the CSP's `connect-src` is computed at build time).
+- [ ] **R2 SMTP (2b item 1):** custom SMTP in the dashboard; then set the email rate limit (2b item 2).
+- [ ] **R3 URLs (2b item 21):** site URL and redirect URLs set to the exact production URL, no wildcards.
+- [ ] **R4 Email templates:** dashboard Authentication > Email Templates, "Magic Link" and "Confirm signup" show the
+      code `{{ .Token }}` (same as `supabase/templates/*.html`).
+- [ ] **R5 Turnstile:** task 3b adds the widget to the sign-in form; then turn on CAPTCHA (2b item 9).
+- [ ] **R6 P1-revised (row 9):** exactly as in the "Production checklist for the person" above (threat model 4.5): with
+      verify at 5 per 5 min, 35 wrong-code `POST /auth/v1/verify` back to back (anon key in a shell variable only,
+      never pasted anywhere), record every status; wait 65 s, send 2 more, record both.
+  - **Pass:** first 429 at or before attempt 6, every later attempt 429, never a 200.
+  - **Burst-bound (expected):** first 429 between attempts 7 and 31, every later one 429, never a 200; after the wait
+    at most 1 non-429, then 429. Release stays blocked until you record one of: (a) Supabase lowers the verify burst
+    and a re-run passes; (b) 8-digit codes (security's recommendation; changes the 6-digit decision); (c) an explicit
+    risk acceptance with the numbers in threat model 4.2.
+  - **Fail:** no 429 by attempt 31, or any 200: stop, row 9 FAIL in production, tell security. (c) does not apply.
+- [ ] **R7 P2:** a signed-in test user makes 60 to-do API calls (list/toggle) in 3 minutes on the deployed app.
+      Pass: no 401 and no 429. Fail: tell security (a design change, not higher limits).
+- [ ] **R8 P4:** on the host, the session cookie has `Secure`; `Origin: https://evil.example` gets 403 and a same-origin
+      to-do create works; the CDN strips `x-middleware-subrequest` and keeps `_rsc` in its cache key.
+- [ ] **R9 Real-user run on the host:** sign in with a code, create, list, toggle, edit, delete; a second user sees
+      none of them; sign out. git-release records it in `specs/3/post-deploy.md`; the orchestrator moves task 3 to DONE.
+- [ ] **R10 Keep off:** leave Auth IP address forwarding off; create no secret API key and no new secret env var for
+      this app (threat model 4.3, 4.5; `specs/3/security-gate.md` release lock).
+- [ ] Optional: the read-only catalog `select`s in `specs/3/schema.md` section 10, rows pasted into `specs/3/post-deploy.md`.
