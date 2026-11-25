@@ -295,9 +295,11 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
   Shell-exported vars keep today's 16-character minimum.
 - **Patterns skip a hit equal to a local server value** (so a bundle holding the local `SERVICE_ROLE_KEY` prints only
   `SERVICE_ROLE_KEY`, not also `service-role-jwt-pattern`).
-- **"From this build":** after the build exits 0, at least one regular file under `.next/static`, `dist` or `build` must be
-  newer than a marker taken just before the build (backdated 2 s where `touch -d` supports it). Stale files alone give
-  `  FAIL  client bundle scan (no client bundle from this build)`. A stub build should write its files during the run.
+- **"From this build":** after the build exits 0, there must be at least one regular file under `.next/static`, `dist`
+  or `build`, and either those dirs held no files before the build, or the sorted file list changed, or a file is newer
+  than a marker taken just before the build (backdated 2 s where `touch -d` supports it). Stale files alone give
+  `  FAIL  client bundle scan (no client bundle from this build)`. (Updated in the build: mtime alone wrongly failed a
+  build that copies files, since Node's `cpSync` on Windows keeps the source mtime.)
 - **In CI with a leak and no local values**, one line is printed: the leak FAIL, with an extra detail line
   `local stack values unavailable (required in CI)`. Without a leak: the AC13 line.
 - **Fake `supabase` stub:** verify.sh calls `supabase status -o env` (first `supabase` on `PATH`; else
@@ -309,8 +311,7 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
   `./tests/e2e`. Detail lists up to 5 paths.
 - **bootstrap-check `gh` stub:** calls are
   `gh auth status`,
-  `gh api --method GET repos/{owner}/{repo}/branches/main/protection` (unchanged; today's call had no `--method`, the
-  new one keeps it as it was),
+  `gh api repos/{owner}/{repo}/branches/main/protection` (unchanged from `main`, no `--method`),
   `gh api --method GET repos/{owner}/{repo}/environments/production`,
   `gh api --method GET repos/{owner}/{repo}/environments/production/deployment-branch-policies?per_page=100`
   (only when the environment says `"custom_branch_policies": true`),
@@ -320,3 +321,41 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
 - **S19 error lines:** `... (could not read: HTTP <code>)`; if stderr has no HTTP code: `... (could not read: gh api failed)`.
   A non-404 error on `environments/production` FAILs both the environment and the policy line with that suffix.
   AC28 lists several names separated by a comma and space: `(found: SUPABASE_A, SUPABASE_B)`.
+
+### devops-cicd, 2026-11-25 (build)
+
+- **Changed:** `scripts/verify.sh` (bundle scan moved from `[secrets]` to `[project]` right after `npm run build`, AC1-AC13;
+  destructive scan via a comment/GRANT/REVOKE-aware awk pass, AC14-AC19; `--passWithNoTests` check before `npm run test`,
+  AC20-AC23), `scripts/bootstrap-check.sh` (S19 lines in `[github]`, AC25-AC31), `roles/qa-test.md` (AC24 bullet, exact
+  text), `tasks/4d/lessons.md` (new, per ORCHESTRATOR.md section 8 as on main after 4a; `Closes: L5, L15, L27`). Contract
+  for qa-test: the entry above (freshness rule updated during the build, see L4d.2).
+- **Verified (manual, scratchpad repos, cleaned up; no committed tests):**
+  - Real `next build` in this worktree with the local stack running: `  PASS  client bundle has no server secrets`
+    (local values read, no info line).
+  - Copy of the real `.next/static` in a temp repo: PASS with the real local values; with a planted **fake**
+    service-role JWT and fake `sb_secret_` key: `  FAIL  server secrets in client bundle: sb-secret-key-pattern service-role-jwt-pattern`
+    (detail names only `.next/static/chunks/planted.js`). Stale bundle + build that writes nothing, build failing with a
+    stale bundle, and a build that writes only empty dirs: each `  FAIL  client bundle scan (no client bundle from this build)`.
+    The real `.next/static` contains the bare `sb_secret_` prefix (1 file) and still PASSes (AC10).
+  - Fixture with random fake status values via a fake `supabase` on `PATH`: AC2/AC7/AC10 PASS; AC5 FAIL with exactly the one
+    name for each of the five; AC8, AC9 (stack up and down), AC11, AC12 (info line + PASS), AC13 CI FAIL; CI + leak prints the
+    leak FAIL with the `local stack values unavailable (required in CI)` detail. No value found in stdout/stderr or
+    `/tmp/verify-*.log` in any run.
+  - Destructive scan on sample SQL: every AC14/AC15 line gives no hit; every AC16/AC17/AC19 line is reported with its line
+    number; AC18 approval PASS. On the four existing migrations: 0 hits (old grep: 6 false hits in
+    `20261125135502_default_privileges_baseline.sql`, all `ALTER DEFAULT PRIVILEGES ... GRANT/REVOKE ... TRUNCATE` and one
+    comment: the L15 case, hence the ALTER DEFAULT PRIVILEGES exemption).
+  - L5 fixture: AC20 FAIL lists `lib/foo.test.ts` (not `node_modules/`), AC21, AC22 (none / only `tests/e2e/*.spec.ts`), AC23.
+  - bootstrap-check with a stub `gh`: AC25 all PASS; AC26 404; AC27 a-e (a against the real repo, b-e stubbed); AC28 over two
+    concatenated pages; AC29 `--offline`; AC30 failing `gh auth status`; AC31 403 on environment, policies and secrets.
+- **`bash scripts/verify.sh --no-db`** (public stack env exported in memory as CI does, for `test:e2e`):
+  `verify.sh: PASS 17/17 (1 skipped)`. Without that export `test:e2e` FAILs on its documented precondition (not this change).
+  The full run with the database (AC33) is the orchestrator's.
+- **bootstrap-check (full, real repo, read-only GET):** `bootstrap-check: FAIL 2 of 34 checks failed (0 skipped)`, both S19
+  lines reflecting real settings: `production` has `deployment_branch_policy: null` (all branches), and
+  `SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD, SUPABASE_PROJECT_ID` are repository secrets (the Environment has none).
+  **For the person** (agents don't change settings): see `tasks/4d/lessons.md` L4d.1.
+- **Left / must know:** qa-test writes `tests/integration/**` per the contract above. origin/main moved to `fcf8ec2` (4a);
+  no overlap with this task's files; this branch isn't merged with main yet (orchestrator). `ci.yml` needs no change. The PR
+  needs the person's `framework-change-approved` label. Decisions for review: the ALTER DEFAULT PRIVILEGES exemption, the
+  8-character minimum for status values, and the trailing space removed from the bundle FAIL name.
