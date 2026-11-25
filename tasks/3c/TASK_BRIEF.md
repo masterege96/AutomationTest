@@ -57,6 +57,8 @@ PROJECT_CONTEXT.md
 
 - **Changed:** `specs/3/post-deploy.md`, `PROJECT_CONTEXT.md`, `tasks/3/TASK_BRIEF.md` (state, release checklist), `tasks/board.md`, this brief.
 - **Verified (read-only):** `list_migrations` shows `20261125165117 create_todos`; integration check on `89b1c2e` success; drift run 45678585136 on `89b1c2e`: `diff: 0 non-comment lines`, "No drift.".
+- **verify.sh:** `bash scripts/verify.sh` (brief from branch name, local stack env exported in the shell only): `verify.sh: PASS 19/19 (0 skipped)`. (A first run failed 7 e2e tests only because the local stack had loaded its email templates from a worktree I had just removed; restarting the stack from the main checkout fixed it.)
+- **Gate round 1:** security FAIL (R1-R9 dropped the P1-revised Fail outcome, the P2 Fail action and the IP-forwarding / secret-key item), review CHANGES_REQUESTED (merge time 18:46 instead of 18:42:59). Fixed in 6d65d3c; round-1 gate files not committed.
 
 ## Blocked (fill in only when BLOCKED)
 
