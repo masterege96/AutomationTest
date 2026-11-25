@@ -37,3 +37,14 @@ Full role flow per ORCHESTRATOR.md: product-spec brief -> builder(s) in their ow
 script gets tests -> security gate and code review in fresh contexts, each in its own commit after the last code
 change -> PR -> the person adds the label and merges. One PR at a time from 4b on, so main never moves under an
 open framework PR.
+
+## After step 4 (agreed with the person, 2026-11-25 20:21 UTC; no UI until the framework is fully finished)
+
+| Step | Goal | Done when |
+|------|------|-----------|
+| **5** Second app from the template | Bootstrap a fresh project from the 4i template and build one feature end to end with something the pilot lacked (related tables, roles or sharing). | Every place where the rules were to-do-specific or needed the orchestrator's hand-holding is a lesson with a fix. |
+| **6** Orchestration as scripts | The orchestrator's manual glue (routing, merging builder worktrees, conflict handling, the local DB lock from 4g) becomes a role contract plus scripts (e.g. `scripts/next-task.sh`). | A fresh agent drives a task from brief to PR with only the repo; the person only approves. |
+| **7** Metrics | Per task: time, fix loops, which gate caught what, API cost (a small metrics file per task next to `board.sh` / `lessons.sh`). | Honest numbers per feature before any bigger decision. |
+| **8** Multi-person hardening | GitHub App gate (4c-app) live, least-privilege tokens, secret-rotation and incident runbooks tested once, branch protection checked automatically, a second-reviewer path. | bootstrap-check covers it; one dry run of each runbook recorded. |
+| **9** To-do app release (in parallel, when the person picks a host) | Host, task 3b (Turnstile), release checklist R1-R10, real-user test. | Task 3 DONE. |
+| **10** UI (control panel) | Only after steps 5-9. | — |
