@@ -416,3 +416,66 @@ commit -> PASS with label T2.
 
 - Full `bash scripts/verify.sh` (with DB, after the 4a merge and qa-test's fixes; local stack env exported in the shell only): `verify.sh: PASS 19/19 (0 skipped)`.
 - New standing check for every step-4 security gate (the person's decision, `tasks/decisions/2026-11-25-4d-supabase-secrets-accepted-until-step4.md`, on the 4d branch): no PR adds or changes a workflow step that reads a `SUPABASE_*` secret outside `.github/workflows/drift.yml`.
+
+### devops-cicd, 2026-11-25 (F1 fix)
+
+Fixes security gate round 1 finding F1 (HIGH) and review round 1 nits 2 and 3. **This entry amends rule 2 (and
+replaces rule 1's role) of the "Rules gate-check applies" list in the Q1 interface entry above**; the env interface,
+the output line prefixes and rule 3 are unchanged.
+
+- **Why:** the old rule 2 counted a push as having the last protected change C when C was an ancestor of the pushed
+  tip. A later revert in that tip means the person labeled a state without C's effect; the agent could then bring C
+  back with no new protected commit (variant A: reset + force-push of the old tip; variant B, no force push: a
+  fast-forward "ours" merge `git commit-tree <old tip>^{tree} -p <old tip> -p <labeled tip>`) and still PASS.
+- **New rules (replace 1 and 2; 3 unchanged):**
+  1. *Same / different push.* Each push line is "same" when its tip is a commit git knows AND the net protected
+     change at that tip (`git diff <merge-base(base, tip)> tip -- <protected paths>`, compared as text, blob ids
+     included) equals the net protected change at HEAD. Every other push is "different": other content, a tip git
+     doesn't know (`0000…` branch deletion, a force-pushed-away tip CI didn't fetch), or a net change that can't be
+     computed (`ERR`). Whether a tip contains some commit is no longer used; the first-parent C walk is gone.
+  2. *Push time.* D = time of the latest different push. Push time = time of the **earliest same push strictly
+     later than D** (if there is no different push: the earliest same push). If there is none, FAIL
+     (`push time of the last protected change could not be read (no push later than the last push with a different
+     protected change (<D>) has HEAD's protected change)`). In words: the label must be later than the last push that
+     CHANGED the branch's net protected content, so every push from the last one before the label onwards had
+     exactly what merges.
+  3. *Label current* (unchanged): `FRAMEWORK_LABEL_TIME` strictly later than the push time.
+- **Edge cases (all fail closed):** an intermediate push whose net protected change differed resets the clock, even
+  when the content later returns to the labeled state (`A`, `B≠A`, `A` again → push time is the second `A`). Unknown
+  tips count as different, so they can only make the push time later. Pushes in the same second have no reliable
+  order, so a same push in the same second as D doesn't count (if HEAD's push ties with a different push, FAIL until
+  a later push). HEAD's net protected change not computable → `push time ... could not be read`. A clean catch-up
+  merge of main stays "same" when main didn't touch the PR's protected files (diff of the PR's files, same blobs);
+  when main changed one of them, the diff's blob ids differ, so the pushes before the catch-up merge become
+  "different" and the catch-up push sets the push time → re-label needed (fails safe; same as review nit 4 / Q4).
+- **Also changed:** `export LC_ALL=C` after `set -uo pipefail` (review nit 3). `net_diff` prints exactly `ERR` and
+  nothing else when any step fails (merge-base, either `git diff`, unknown kind), and the freshness check treats
+  `ERR` in G, G^1 or HEAD as stale (review nit 2). The `git diff --name-only` that lists protected paths now FAILs
+  if git fails (it used to read as "no protected change"). Messages: PASS/FAIL label lines now name the push
+  (`tip <sha> at <time>`) instead of C; prefixes unchanged.
+- **Verified:** scratch fixture (the qa steps below, `mktemp -d`, deleted on exit), run with the old script
+  (`3e087dd`) and the new one. Old: legit PASS, **variant A PASS, variant B PASS** (the F1 bypass), same-second tie
+  PASS (a second bypass: order within a second is unknown). New: legit (label 10:05 after the 10:00 `GS2` push) PASS;
+  variant A `LABEL_OLD ... tip <GS> at 10:10` listing `scripts/evil.sh`, exit 1; variant B `LABEL_OLD ... tip <M> at
+  10:10` listing `scripts/evil.sh`, exit 1; variant B re-labeled at 10:15 PASS; intermediate differing push FAIL at
+  label 10:05 and PASS at 10:25; unknown tip in between FAIL; same-second tie `PUSH_TIME_BAD`, exit 1.
+  `bash -n` OK. `npx vitest run tests/integration/gate-check.test.ts` (existing tests, new script): 78 passed (78).
+- **For qa-test (regression tests, AC18 family), exact fixture steps** (`main`: `scripts/x.sh` = `echo x`,
+  `app/a.ts`; branch `ci/9x-test`; gates = commit writing `specs/9x/security-gate.md` `Result: PASS` and
+  `specs/9x/review.md` `Result: APPROVE`; always `FRAMEWORK_CHANGE_APPROVED=1`, `--base main --head <sha>`):
+  1. Commit Q: `scripts/x.sh` = `echo x2`. Commit P: add `scripts/evil.sh` (`echo evil`). Gates → `GS`.
+     `git revert --no-edit P`. Gates again → `GS2` (net protected = `scripts/x.sh` only).
+  2. Legit: head `GS2`, label `10:05`, pushes `10:00 GS2` → `gate-check: PASS`, exit 0.
+  3. Variant A (force push): head `GS`, label `10:05`, pushes `10:00 GS2`, `10:10 GS` → `LABEL_OLD` line listing
+     `scripts/evil.sh`, exit 1; re-label `10:15` → PASS.
+  4. Variant B (fast-forward): `M = git commit-tree GS^{tree} -p GS -p GS2 -m merge`; head `M`, label `10:05`,
+     pushes `10:00 GS2`, `10:10 M` → `LABEL_OLD` listing `scripts/evil.sh`, exit 1; re-label `10:15` → PASS.
+  5. Intermediate differing push: from `GS2` commit `app/b.ts` + gates → `H` (net protected = `GS2`'s).
+     Pushes `10:00 GS2`, `10:10 GS`, `10:20 H`: label `10:05` → `LABEL_OLD`, exit 1; label `10:25` → PASS.
+  6. Unknown tip in between: pushes `10:00 GS2`, `10:10 <40 hex not in the repo>`, `10:20 H`, label `10:05` →
+     `LABEL_OLD`, exit 1.
+  7. Same-second tie: pushes `10:00 GS2`, `10:10 H`, `10:10 GS` (either order), head `H`, label `10:15` →
+     `PUSH_TIME_BAD` (`no push later than the last push with a different protected change`), exit 1.
+  The existing tests need no change (all expectations hold under the new rule).
+- **Left:** qa-test adds the tests above; security and review re-run on the new commits (gates are stale now: code
+  changed). The orchestrator records in the brief that Q1 rule 2 is amended by this entry.
