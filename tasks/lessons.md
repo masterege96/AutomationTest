@@ -183,7 +183,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   decides whether to grant it or to have the diff use only the DB password with a read-only role (follow-up).
 - **Production migration history (read-only, via the Supabase connector's list_migrations):** empty. The init
   migration `20261125104017` is not applied, so the Supabase GitHub integration hasn't deployed yet. The
-  person checks the integration (production branch `main`, directory `supabase`, "Deploy to production" on).
+  person checks the integration (production branch `main`, directory `.` (the folder that contains `supabase/`), "Deploy to production" on).
   Nothing was changed in production.
 - **Note (AGENT_RULES 13):** the Supabase connector on this machine also exposes write tools
   (`execute_sql`, `apply_migration`). They were not used and must never be used against production.
@@ -197,6 +197,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   exposed schema grants exactly the privileges the API needs, and a pgTAP test checks those grants.
 - **Process note:** drift run 45624888333's artifact was downloaded and deleted about a minute after upload;
   the opt-in upload path worked as designed (gitleaks clean).
+
 ## L15. verify.sh flags privilege names as destructive SQL (open, the person decides)
 
 - **Seen:** task 1, `verify.sh --brief tasks/1/TASK_BRIEF.md`:
@@ -222,7 +223,37 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   `concurrency: ci-${{ github.ref }}` group, or never created (e.g. Actions delay). Then document the
   expected way to re-evaluate a PR after a label change.
 
-## L17. The local stack doesn't enforce the per-IP auth rate limits (open, security decides)
+## L17. A post-deploy record under specs/<id>/ makes the task's gates stale (open, devops-cicd)
+
+- `gate-check.sh` treats every change outside `specs/<id>/security-gate.md`, `specs/<id>/review.md` and
+  `tasks/**` as a code change. `specs/<id>/post-deploy.md` (git-release, written after merge) would
+  therefore need both gates re-run, although it isn't code. verify.sh's scope check already allows it.
+- **Workaround used (task 0, task 1):** the post-deploy evidence is in the briefs' Handoff sections.
+- **Suggested fix:** exclude `specs/<id>/post-deploy.md` from `LAST_CODE` in gate-check.sh, the same way
+  as the two gate files (framework change, needs the person's label).
+## L18. verify.sh ran the project tests before the local database started (fixed in task 2c)
+
+- **Seen:** task 2b design: `scripts/verify.sh` ran "Project checks" (`npm test`, `test:e2e`) before
+  "Database from scratch" started the local Supabase stack, so tests that need the stack (auth, e2e)
+  could not pass in verify.sh or CI.
+- **Fixed:** task 2c moves the database section before the project checks (headings renumbered, comment
+  at the section). No check added, removed or changed.
+- **Still open:** the CI `verify` job sets no local-stack env vars (URL, keys). That is a separate task
+  (devops-cicd, workflow) when the first test that needs them lands.
+
+## L19. A PR with merge conflicts gets no `pull_request` CI run (open, orchestrator/git-release)
+
+- **Seen:** PR #9 (task 2c) after PR #8 merged: only `merge-gate` (pull_request_target) ran; ci.yml's
+  verify/db-check/secrets never started, because GitHub doesn't run `pull_request` workflows while the PR
+  is `CONFLICTING`. Conflicts were only in `tasks/board.md` and `tasks/lessons.md`.
+- **Likely also explains L16** (no run after the label on PR #7, which was behind/conflicting with main then).
+- **Fix suggested:** parallel branches shouldn't all append to the same shared files. Use per-task lesson
+  files (`tasks/<id>/lessons.md`) or task-scoped lesson ids, and let only git-release update `tasks/board.md`
+  after merge. Until then, git-release merges main into open PRs right after each merge.
+- **Related:** lesson numbers collide across branches (2a and 2b both wrote an "L17"); they get renumbered
+  when merged.
+
+## L21. The local stack doesn't enforce the per-IP auth rate limits (open, security decides)
 
 - **Seen:** task 2b, manual check L1: with `token_verifications = 5` in `config.toml` (auth container env
   `GOTRUE_RATE_LIMIT_VERIFY=5`), 10 wrong-OTP `POST /auth/v1/verify` requests all returned `403 otp_expired`,
@@ -234,3 +265,13 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **Fix to the framework (suggested):** security's threat-model template says per-IP auth limits are proven by the
   static config test locally plus a read-only post-deploy check on production (person-run), not by a local live test;
   or devops-cicd finds a supported CLI setting that enables the header locally (needs the person's OK).
+
+## L22. A catch-up merge of main makes a task's gates stale (open, devops-cicd)
+
+- **Seen:** tasks 2a and 2b, after PR #9 merged. Merging origin/main into the branch creates a merge commit
+  that brings in main's non-tasks changes (here `scripts/verify.sh`), and `gate-check.sh` counts that merge
+  commit as the last code change, so both gates must run again although the task's own code didn't change.
+  (PR #9 itself was fine: main had only changed `tasks/**` then.)
+- **Suggested fix:** in gate-check.sh, compute the last code change with `git log --first-parent --no-merges`
+  on the branch, or compare the PR's net diff (`git diff MB..HEAD`) at the gate commit vs. at HEAD; framework
+  change, needs the person's label. Until then: merge main before running the gates, not after.

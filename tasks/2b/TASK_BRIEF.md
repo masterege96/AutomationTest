@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | BACKLOG |
+| State | IN_REVIEW |
 | Owner role | devops-cicd (`next.config.*` headers block, `supabase/config.toml`, production dashboard checklist); qa-test (`tests/integration/**`, `specs/2b/test-plan.md`) |
 | Branch | `sec/2b-headers-auth-defaults` |
 | Worktree | `../wt-2b-devops-cicd` |
@@ -24,8 +24,8 @@ production.
 **Headers (part b)**
 
 - [ ] AC1: `specs/2b/threat-model.md` (security) gives the exact value of each header: `Content-Security-Policy`, frame protection (`X-Frame-Options` and/or CSP `frame-ancestors`, as security decides), `Referrer-Policy`, `X-Content-Type-Options`, `Permissions-Policy`. devops-cicd copies those values into the headers block of `next.config.ts`, unchanged; the existing options in that file (`cacheComponents`, `partialPrefetching`) stay as they are.
-- [ ] AC2: Given the app, when `/` and at least one other path (listed in `specs/2b/test-plan.md`) are requested, then each response carries all five headers with exactly the values in the threat model. The test lives in `tests/integration/**` and runs in `npm test`.
-- [ ] AC3 (unhappy path): Given a response where any one of the five headers is missing or has a different value, when the test runs, then it fails and names the header. qa-test shows this once (for example a red run with one header removed locally, not committed) and records it in the Handoff.
+- [ ] AC2: Given the app, when `/` and at least one other path (listed in `specs/2b/test-plan.md`) are requested, then each response carries all six headers with exactly the values in the threat model. The test lives in `tests/integration/**` and runs in `npm test`.
+- [ ] AC3 (unhappy path): Given a response where any one of the six headers is missing or has a different value, when the test runs, then it fails and names the header. qa-test shows this once (for example a red run with one header removed locally, not committed) and records it in the Handoff.
 - [ ] AC4: `npm run build` still succeeds and `/` still renders with the headers on (the CSP doesn't block the app's own scripts or styles; no CSP violation in the browser console on `/`).
 
 **Auth defaults for local and CI (part c)**, in `supabase/config.toml` (values from security's threat model unless the request fixes them):
@@ -172,7 +172,7 @@ specs/2b/**            # threat-model.md + security-gate.md (security), test-pla
   - **AC6: PASS.** `POST /auth/v1/signup` with a 9-char password (`abcdefg12`): `422`, `error_code: weak_password`, reasons `["length"]`; 11 chars: same `422`; `auth.users` count for that email after both: `0`. 12 chars without a digit: `422 weak_password` reasons `["characters"]` (letters_digits works). Exactly 12 chars with letters and digits: `200`, user created (count 1), unconfirmed.
   - **AC7: PASS.** Signup with a valid password: `200`; `POST /auth/v1/token?grant_type=password` before confirming: `400`, `error_code: email_not_confirmed`, no `access_token`; DB shows `email_confirmed_at` and `last_sign_in_at` null.
   - **L1 (row 9): FAIL.** 10 wrong-OTP `POST /auth/v1/verify` (`{"type":"email","email":"qa-l1@example.test","token":"000000"}`): attempts 1-10 all `403 otp_expired`, **no 429**, never a session. Repeated with an existing unconfirmed user (the AC7 address): again 10 x `403 otp_expired`, no 429, no session. The auth container has `GOTRUE_RATE_LIMIT_VERIFY=5` but no `GOTRUE_RATE_LIMIT_HEADER`; my unverified understanding is that GoTrue applies its per-IP limits only when a rate-limit header is configured (the hosted platform sets one), so the local stack doesn't enforce `token_verifications` at all. Spacing: AC6/AC7 used 8 sign-up/sign-in requests (< 10) before L1, so they were not affected by any limit.
-  - **Owner of the L1 failure: security** (decide whether row 9 can be proven locally at all, or whether S5 + the production checklist + a post-deploy check on production replace L1) with **devops-cicd** if a config change is wanted. Not fixed by me (outside my paths); limits not raised. Recorded as lesson L17.
+  - **Owner of the L1 failure: security** (decide whether row 9 can be proven locally at all, or whether S5 + the production checklist + a post-deploy check on production replace L1) with **devops-cicd** if a config change is wanted. Not fixed by me (outside my paths); limits not raised. Recorded as lesson L21.
 - **Five vs six headers (for product-spec):** AC2/AC3 say "five headers"; the threat model A2 has six (adds `Strict-Transport-Security`). Tests check all six. Please update the AC wording.
 - **Not covered:** `email_sent` behavior locally (devops-cicd observed the CLI doesn't apply it without SMTP; not asserted); production dashboard values (AC10, the person applies them; nothing automated checks production); no automated live auth tests until task 2c decides how `npm test` gets a stack.
 - **Test users left on the local stack:** `qa-ac6-1795619325@example.test`, `qa-ac6b-*@example.test`, `qa-ac7-1795619325@example.test` (unconfirmed; gone at the next `db reset`).
@@ -181,3 +181,10 @@ specs/2b/**            # threat-model.md + security-gate.md (security), test-pla
 
 - **Missing:**
 - **Who must provide it:**
+
+### orchestrator, 2026-11-25
+
+- AC2/AC3 wording changed from "five" to "six headers" (review finding 2; the threat model adds HSTS). Done by the orchestrator in tasks/ so the gates stay valid; product-spec owns the wording if it wants to change it.
+- **Dashboard checklist item 22 (required, from the security gate P1):** after the first production deploy, after applying the rate-limit item and before any real user: (1) confirm Authentication > Rate Limits shows token verifications 5 per 5 minutes; (2) from one machine send 10 `POST https://<project-ref>.supabase.co/auth/v1/verify` with header `apikey: <publishable/anon key>` (shell variable only, never written down) and body `{"type":"email","email":"<own test address>","token":"000000"}` (ready loop in `specs/2b/security-gate.md`); (3) pass = 429 at or before attempt 6 and on every attempt after it, never a 200; no 429 by attempt 9 = stop, no real users, tell security; (4) record the ten status codes and the date in `tasks/decisions.md`. Task 3's login isn't released to real users until this passes.
+- Merged main (PR #8, PR #9) into this branch. This branch's lesson renumbered L17 → L21; added L22 (a catch-up merge makes gates stale).
+- The person's task 2 answers are in `tasks/decisions.md` on the 2a branch (PR for 2a); this brief quotes them.
