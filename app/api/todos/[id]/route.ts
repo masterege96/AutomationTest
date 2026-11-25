@@ -1,6 +1,6 @@
 // GET / PATCH / DELETE /api/todos/[id]. Contract: tasks/3/TASK_BRIEF.md, backend-dev Option A.
 // Not-yours and not-found are the same: RLS returns 0 rows, which is 404 with the same body (AC22, AC44).
-import { readJsonBody } from "@/lib/server/body";
+import { isJsonContentType, readJsonBody } from "@/lib/server/body";
 import { apiError, internalError, jsonResponse, methodNotAllowed, noContent } from "@/lib/server/errors";
 import { guardRequest } from "@/lib/server/todo-api";
 import { todoIdSchema, TODO_COLUMNS, updateTodoSchema } from "@/lib/server/todo-schemas";
@@ -62,6 +62,9 @@ export async function PATCH(request: Request, ctx: Ctx) {
 export async function DELETE(request: Request, ctx: Ctx) {
   const g = await guardRequest(request, { mutation: true });
   if (!g.ok) return g.response;
+  // JSON content type on every state-changing request (threat model 5: forces a CORS preflight cross-site).
+  // DELETE has no body, so nothing is read or parsed.
+  if (!isJsonContentType(request.headers.get("content-type"))) return apiError("unsupported_media_type");
 
   const id = await parseId(ctx);
   if (!id) return apiError("invalid_id");
