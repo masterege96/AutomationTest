@@ -9,7 +9,6 @@
 ## Owns (allowed paths)
 ```
 tasks/<id>/TASK_BRIEF.md     # Goal, Acceptance criteria, Scope, Inputs, Destructive sections
-tasks/board.md               # adding new rows only
 ```
 
 ## Never touches

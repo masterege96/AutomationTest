@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | DONE |
 | Owner role | devops-cicd |
 | Branch | `ci/2c-verify-db-first` |
 | Worktree | `../wt-2c-devops-cicd` |

@@ -1,4 +1,5 @@
 # Lessons
+Archive, frozen since task 4a (2026-11-25): `frozen; new entries go to tasks/<id>/lessons.md` (ids `L<id>.<n>`); close an archived lesson with a `Closes:` line there, see ORCHESTRATOR.md section 8.
 
 Every entry ends with a fix to a role contract, a rulebook or a script. A lesson without a fix stays open.
 

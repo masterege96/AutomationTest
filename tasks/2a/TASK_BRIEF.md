@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | DONE |
 | Owner role | db-architect (spec), db-builder (migration, pgTAP test) |
 | Branch | `db/2a-function-privileges` |
 | Worktree | `../wt-2a-db-builder` |
