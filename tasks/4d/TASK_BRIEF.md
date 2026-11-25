@@ -359,3 +359,44 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
   no overlap with this task's files; this branch isn't merged with main yet (orchestrator). `ci.yml` needs no change. The PR
   needs the person's `framework-change-approved` label. Decisions for review: the ALTER DEFAULT PRIVILEGES exemption, the
   8-character minimum for status values, and the trailing space removed from the bundle FAIL name.
+
+### devops-cicd, 2026-11-25 (S19 accepted risk, after the person's decision of 20:50 UTC)
+
+- **Changed:** `scripts/bootstrap-check.sh` only (commit `9515f95`), per
+  `tasks/decisions/2026-11-25-4d-supabase-secrets-accepted-until-step4.md` (condition 2).
+- **Risk open** = that file exists and no regular file under `tasks/decisions/` has a line exactly
+  `Closes decision: 2026-11-25-4d-supabase-secrets-accepted-until-step4.md` (whole line, no indent or prefix; a trailing CR
+  is ignored). Files are only read (`tr`/`grep -qxF`), never executed. The decision file's own backticked mention does not
+  close it. Checked once per full run, only in the S19 block (`--offline` and gh-missing paths unchanged).
+- **Result-line contract (additions to AC25-AC31).** While the risk is open, these findings print RISK instead of FAIL,
+  with the same `fix:` line as the FAIL would have:
+  - every AC27 case (a-e): `  RISK  production deploys only from main (deployment branch policy) (ACCEPTED RISK until step 4 ends, see tasks/decisions/2026-11-25-4d-supabase-secrets-accepted-until-step4.md)`
+  - AC28: `  RISK  no repository-level SUPABASE_* secrets (found: <NAMES>) (ACCEPTED RISK until step 4 ends, see tasks/decisions/2026-11-25-4d-supabase-secrets-accepted-until-step4.md)`
+  - Never RISK (FAIL exactly as before even while open): AC26 (404, both lines), AC30, every AC31 `(could not read: ...)` line.
+  - PASS stays PASS (AC25) whatever the decision state.
+- **Summary line:** a RISK counts in the total, not as a failure; exit 0 if no FAIL.
+  `bootstrap-check: PASS <pass>/<total> (<r> accepted risk[s], <skip> skipped)` (`1 accepted risk`, `2 accepted risks`);
+  with a FAIL as well: `bootstrap-check: FAIL <fail> of <total> checks failed (<r> accepted risk[s], <skip> skipped). Phase 0 is not complete: only git-release and devops-cicd may work.`
+  With no RISK line, both summaries are exactly as before (no risk text).
+- **AC35 (risk open):** Given the decision file exists, no file in `tasks/decisions/` has the `Closes decision:` line, and
+  `gh` reports `production` with `deployment_branch_policy: null` and a repository secret `SUPABASE_ACCESS_TOKEN`, When
+  bootstrap-check runs (full) and nothing else fails, Then it prints the two RISK lines above, each followed by its `fix:`
+  line, no S19 FAIL, ends `bootstrap-check: PASS 32/34 (2 accepted risks, 0 skipped)` (in a full repo) and exits 0.
+- **AC36 (decision closed or missing):** Given the same `gh` answers and either a file in `tasks/decisions/` with the line
+  `Closes decision: 2026-11-25-4d-supabase-secrets-accepted-until-step4.md` (LF or CRLF) or the decision file absent,
+  When bootstrap-check runs, Then the output is the AC27a/AC28 FAIL lines and summary exactly as before this change
+  (no `RISK`, no `accepted risk`) and it exits 1. A line that only contains the text (indented, prefixed, in backticks) does
+  not close the decision.
+- **AC37 (settings fixed, and errors not masked):** Given the risk is open and `gh` reports the AC25 settings, When
+  bootstrap-check runs, Then the three S19 lines PASS and the summary has no risk text. Given the risk is open and the
+  environment is 404 or a listing returns 403, Then those lines FAIL as in AC26/AC31 (only a readable finding becomes RISK),
+  e.g. 403 on secrets plus policy null: `bootstrap-check: FAIL 1 of 34 checks failed (1 accepted risk, 0 skipped). ...`, exit 1.
+- **Verified:** real repo, read-only GET (`bash scripts/bootstrap-check.sh`): both S19 lines RISK,
+  `bootstrap-check: PASS 32/34 (2 accepted risks, 0 skipped)`, exit 0. Scratch copy of the repo with a stub `gh`:
+  open -> RISK x2, exit 0; CRLF closing file -> FAIL x2, exit 1, output byte-identical (`cmp`) to the pre-change script;
+  decision file removed -> byte-identical to the old script, exit 1; settings fixed -> 3 PASS, `PASS 34/34 (0 skipped)`;
+  403 on secrets -> FAIL `(could not read: HTTP 403)` + 1 RISK, exit 1; env 404 -> both env lines FAIL, secrets RISK;
+  indented close line -> still RISK. Scratch files removed.
+- **Left:** qa-test adds AC35-AC37 to `tests/integration/**` (fixture: a temp `tasks/decisions/` with/without the
+  decision and closing files). Before 4i: the person moves the secrets (L4d.1), then a closing decision file, after which
+  bootstrap-check FAILs again until the settings are fixed.
