@@ -3,7 +3,7 @@
 // (backend-dev). Relative import: Vitest has no `@/` alias configured (vitest.config.ts, devops-cicd).
 // Expected strings are copied from the threat model. Copy changes from there only.
 import { describe, expect, it } from "vitest";
-import { buildCsp } from "../../lib/server/csp";
+import { buildCsp, generateNonce } from "../../lib/server/csp";
 
 // Local API URL from supabase/config.toml ([api] port 55421) and a fixed test nonce (16 zero bytes, base64).
 // Test values, not secrets.
@@ -112,4 +112,22 @@ describe("buildCsp (task 3 nonce CSP, threat model 6.3 / N1)", () => {
       expect(prod(supabaseUrl)).toBe(PROD_NO_ORIGIN);
     },
   );
+});
+
+describe("generateNonce (threat model 6.2 / N2)", () => {
+  it("N2: 1,000 nonces are unique and each is 16 bytes of standard base64", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 1000; i++) {
+      const n = generateNonce();
+      expect(n).toMatch(/^[A-Za-z0-9+/]{22}==$/);
+      expect(Buffer.from(n, "base64")).toHaveLength(16);
+      seen.add(n);
+    }
+    expect(seen.size).toBe(1000);
+  });
+
+  it("N2: a generated nonce is accepted by buildCsp and lands in script-src", () => {
+    const n = generateNonce();
+    expect(buildCsp({ nonce: n, supabaseUrl: LOCAL_API, isDev: false })).toBe(PROD_LOCAL.replace(NONCE, n));
+  });
 });

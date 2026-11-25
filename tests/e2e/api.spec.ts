@@ -2,7 +2,7 @@
 import { test, expect } from "./support/fixtures";
 import { expectError, type Todo } from "./support/api";
 import { newUser } from "./support/auth";
-import { isUuid, rows, seedTodo, todoById, todosOf, uuidLit } from "./support/db";
+import { isUuid, lit, rows, seedTodo, todoById, todosOf, uuidLit } from "./support/db";
 
 test.describe("API contract (Option A)", () => {
   test("list, create, read, change and delete as the owner return the documented shapes", async ({ api }) => {
@@ -88,15 +88,16 @@ test.describe("duplicate and rapid actions at the API (AC43-AC45)", () => {
   test("AC45: 20 parallel creates give exactly 20 rows, each with its own title, all owned by the user", async ({ api }) => {
     const user = await newUser("ac45");
     const a = await api(user.cookies);
-    const titles = Array.from({ length: 20 }, (_, i) => `Parallel ${String(i).padStart(2, "0")}`);
+    // Titles carry this user's id, so rows from earlier runs on the shared stack never count as "another user".
+    const tag = `Parallel ${user.id}`;
+    const titles = Array.from({ length: 20 }, (_, i) => `${tag} ${String(i).padStart(2, "0")}`);
     const results = await Promise.all(titles.map((title) => a.create({ title })));
     for (const r of results) expect(r.status).toBe(201);
     const stored = todosOf(user.id);
     expect(stored).toHaveLength(20);
     expect(stored.map((t) => t.title).sort()).toEqual(titles);
     const elsewhere = rows<{ n: number }>(
-      `select count(*)::int as n from public.todos where title like 'Parallel %' and user_id <> ${uuidLit(user.id)}
-         and created_at > now() - interval '10 minutes'`,
+      `select count(*)::int as n from public.todos where starts_with(title, ${lit(tag)}) and user_id <> ${uuidLit(user.id)}`,
     );
     expect(elsewhere[0].n, "rows for any other user").toBe(0);
   });

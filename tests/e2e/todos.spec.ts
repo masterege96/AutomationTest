@@ -3,9 +3,9 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./support/fixtures";
 import { testEmail } from "./support/env";
-import { todoById, todosOf, seedTodo } from "./support/db";
-import { ensureConfirmedUser, newUser, sessionFor } from "./support/auth";
-import { LIST_PATH, TEXT, addSession, addTodoViaUi, isStruckThrough, signInViaUi, ui } from "./support/ui";
+import { authUsersByEmail, todoById, todosOf, seedTodo } from "./support/db";
+import { newUser, sessionFor } from "./support/auth";
+import { LIST_PATH, TEXT, addSession, addTodoViaUi, expectSignInScreen, isStruckThrough, setDone, signInViaUi, ui } from "./support/ui";
 
 /** Waits until every to-do API request this page started has a response. */
 function trackApi(page: Page) {
@@ -76,8 +76,7 @@ test.describe("to-dos, happy paths (AC10-AC15)", () => {
     await page.goto(LIST_PATH);
     for (const target of [true, false]) {
       const item = ui.item(page, "Toggle me");
-      if (target) await ui.checkbox(item).check();
-      else await ui.checkbox(item).uncheck();
+      await setDone(item, target);
       await expect.poll(() => todoById(id)?.done).toBe(target);
       await page.reload();
       const after = ui.item(page, "Toggle me");
@@ -118,25 +117,30 @@ test.describe("to-dos, happy paths (AC10-AC15)", () => {
   });
 
   test("AC15: after sign-out and a new sign-in in a new browser context, the same to-dos and done states show", async ({ browser }) => {
+    // First sign-in through the UI (Mailpit code). The second sign-in is a real session for the same address made
+    // through the admin code (support/auth), because a second UI code request within 60 s is refused by design
+    // (max_frequency, AC7) and an admin-generated code counts as a send too, so the order can't be reversed.
     const email = testEmail("ac15");
-    await ensureConfirmedUser(email);
-    const first = await sessionFor(email);
     const ctx1 = await browser.newContext();
     const p1 = await ctx1.newPage();
-    await addSession(ctx1, first.cookies);
-    await p1.goto(LIST_PATH);
+    await signInViaUi(p1, email);
+    const userId = authUsersByEmail(email)[0].id;
     await addTodoViaUi(p1, "Persist one");
     await expect(ui.item(p1, "Persist one")).toBeVisible();
     await addTodoViaUi(p1, "Persist two");
     await expect(ui.item(p1, "Persist two")).toBeVisible();
-    await ui.checkbox(ui.item(p1, "Persist one")).check();
-    await expect.poll(() => todosOf(first.id).find((t) => t.title === "Persist one")?.done).toBe(true);
+    await setDone(ui.item(p1, "Persist one"), true);
+    await expect.poll(() => todosOf(userId).find((t) => t.title === "Persist one")?.done).toBe(true);
     await ui.signOut(p1).click();
+    await expectSignInScreen(p1);
     await ctx1.close();
 
+    const second = await sessionFor(email);
+    expect(second.id).toBe(userId);
     const ctx2 = await browser.newContext();
     const p2 = await ctx2.newPage();
-    await signInViaUi(p2, email);
+    await addSession(ctx2, second.cookies);
+    await p2.goto(LIST_PATH);
     await expect(ui.items(p2)).toHaveCount(2);
     await expect(ui.checkbox(ui.item(p2, "Persist one"))).toBeChecked();
     await expect(ui.checkbox(ui.item(p2, "Persist two"))).not.toBeChecked();

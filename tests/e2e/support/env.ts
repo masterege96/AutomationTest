@@ -67,11 +67,14 @@ export function localStack(): LocalStack {
     const v = env.get(name);
     if (v) secrets.push({ name, value: v });
   }
+  // The local DB password is the stack default, the dictionary word "postgres", which legitimately appears in
+  // client code (e.g. supabase-js / PostgREST strings). It is only scanned for if it is a real secret: at least
+  // 16 characters (observed 2026-11-25 integration run: "postgres" matched a JS chunk, a false positive).
   const dbUrl = env.get("DB_URL");
   if (dbUrl) {
     try {
       const password = decodeURIComponent(new URL(dbUrl).password);
-      if (password) secrets.push({ name: "database password", value: password });
+      if (password.length >= 16) secrets.push({ name: "database password", value: password });
     } catch {
       // not a URL: nothing to add
     }

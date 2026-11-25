@@ -6,10 +6,10 @@ import { APP_ORIGIN } from "./env";
 import { authCookieName, type SessionCookie } from "./auth";
 import { latestCode } from "./mailpit";
 
-// Paths (assumed): the to-do list is the root page; the sign-in screen has its own path. Signed-out visitors of the
+// Paths (frontend-dev build Handoff): the to-do list is the root page; the sign-in screen is /sign-in. Signed-out visitors of the
 // list are sent to the sign-in screen. Tests never depend on the sign-in path except AC35 (CSP on that screen).
 export const LIST_PATH = "/";
-export const SIGN_IN_PATH = "/login";
+export const SIGN_IN_PATH = "/sign-in";
 
 export const TEXT = {
   codeSent: "Check your email for a sign-in code.",
@@ -66,7 +66,7 @@ export async function signInViaUi(page: Page, email: string): Promise<string> {
   const code = await latestCode(email);
   await enterCode(page, code);
   await expect(ui.signOut(page)).toBeVisible();
-  await expect(page.getByText(email, { exact: true })).toBeVisible();
+  await expect(page.getByText(`Signed in as ${email}`, { exact: true })).toBeVisible();
   return code;
 }
 
@@ -96,4 +96,18 @@ export async function isStruckThrough(item: Locator, title: string): Promise<boo
     }
     return false;
   });
+}
+
+/**
+ * Clicks an item's checkbox and waits until it shows the wanted state. The checkbox is controlled by the server's
+ * answer (frontend-dev: the item shows the state the server returned), so Playwright's check()/uncheck(), which
+ * demand an immediate state change, don't fit; the assertion (checked / not checked) is the same.
+ */
+export async function setDone(item: Locator, done: boolean): Promise<void> {
+  const box = ui.checkbox(item);
+  if (done) await expect(box).not.toBeChecked();
+  else await expect(box).toBeChecked();
+  await box.click();
+  if (done) await expect(box).toBeChecked();
+  else await expect(box).not.toBeChecked();
 }

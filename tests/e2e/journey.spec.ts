@@ -5,7 +5,7 @@
 import { test, expect } from "./support/fixtures";
 import { ANON_KEY, SUPABASE_URL, localStack, testEmail } from "./support/env";
 import { authUsersByEmail, todosOf } from "./support/db";
-import { addTodoViaUi, expectSignInScreen, signInViaUi, ui } from "./support/ui";
+import { addTodoViaUi, expectSignInScreen, setDone, signInViaUi, ui } from "./support/ui";
 
 type Seen = { where: string; text: string };
 
@@ -62,7 +62,7 @@ test("AC25 + AC36: full journey leaks no secret, uses only the anon key, and has
   await addTodoViaUi(page, "Journey milk");
   await expect(ui.item(page, "Journey milk")).toBeVisible();
   // AC12
-  await ui.checkbox(ui.item(page, "Journey milk")).check();
+  await setDone(ui.item(page, "Journey milk"), true);
   await expect.poll(() => todosOf(userId)[0]?.done).toBe(true);
   // AC13
   await ui.editButton(ui.item(page, "Journey milk")).click();

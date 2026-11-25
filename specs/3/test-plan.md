@@ -43,24 +43,27 @@ run: 13 code requests (12 sent emails + AC7's refused one) and about 45 `/auth/v
 setup through the admin-generated code, 7 UI sign-ins, AC31's 10 wrong codes as the AC requires, AC5's replay). The
 local stack does not enforce the per-IP limits (`sign_in_sign_ups`, `token_verifications`; L21), so this does not
 throttle the run; none of it touches production. The email limit per address is enforced locally (AC7).
+**Decision (orchestrator, 2026-11-25, integration run):** keep the tests as they are (each sign-in its own address);
+the local stack does not enforce the per-IP limits (L21), so the per-run counts above are accepted locally. Row 9 is
+proven by AC32 (static S5 + production P1-revised), never by these runs.
 
-## UI contract the e2e tests assume (frontend-dev: confirm or tell qa-test)
+## UI contract the e2e tests use (aligned to the frontend-dev build Handoff, 2026-11-25)
 
 All of it is in one place, `tests/e2e/support/ui.ts`; a different name or path is a one-line change there.
 
 | What | Assumed | Source |
 |------|---------|--------|
-| List page path | `/` (signed-out visitors see the sign-in screen, by redirect or in place) | assumption |
-| Sign-in screen path | `/login` (used only by AC35/N2/N4/N6 header checks) | assumption |
+| List page path | `/` (signed out: 307 to `/sign-in`) | frontend-dev build |
+| Sign-in screen path | `/sign-in` | frontend-dev build |
 | Email field | label "Email address"; must not block submit with native browser validation (`noValidate`), so AC3's message shows | assumption |
 | Request button | "Send code" | assumption |
 | Code field / button | label "Sign-in code" / button "Sign in" | assumption |
-| Header | shows the user's email as its own text node; button "Sign out" | brief AC1, AC8 |
+| Header | "Signed in as <email>"; button "Sign out" | brief AC1, AC8; frontend-dev build |
 | New to-do | field label "New to-do", button "Add" (enabled when the field is empty, so AC17 "empty" shows the message); no `maxLength` on the field (AC17 201 chars must show the message and keep the input) | brief AC10, AC17 |
 | List | `<ul>`/`role=list` with accessible name "To-dos"; one `listitem` per to-do; title as its own text node; one checkbox per item | assumption |
 | Done style | checkbox checked and the title (or an ancestor inside the item) has `text-decoration: line-through` or is inside `<s>`/`<del>` | brief AC12 |
-| Edit | per-item button whose name starts with "Edit"; edit field label "Edit title"; button "Save" | assumption |
-| Delete | per-item button whose name starts with "Delete"; no confirm dialog | assumption (brief: no undo) |
+| Edit | per-item button `Edit "<title>"`; edit field label "Edit title"; button "Save" | frontend-dev build |
+| Delete | per-item button `Delete "<title>"`; no confirm dialog | frontend-dev build |
 | Messages | the exact quoted texts of AC1, AC3, AC4, AC7, AC2, AC17, AC44 | brief |
 
 ## Acceptance criteria
@@ -74,15 +77,15 @@ All of it is in one place, `tests/e2e/support/ui.ts`; a different name or path i
 | AC5 | used code refused after sign-out (replayed from the browser exactly as `verifyOtp` sends it; a UI re-request is impossible within 60 s and would invalidate the code anyway); expiry: static S-test | `tests/e2e/auth.spec.ts`; `tests/integration/auth-config.test.ts` | `AC5: a code that was already used cannot sign in again after sign-out`; S8/S9 | e2e + static |
 | AC6 | known vs unknown address: same text, same `/auth/v1/otp` status | `tests/e2e/auth.spec.ts` | `AC6: known and unknown addresses get the same screen text and the same auth status` | e2e |
 | AC7 | second request <60 s: wait message, 429, still one email (local stack enforces it: probe 2026-11-25 gave 429 `over_email_send_rate_limit`) | `tests/e2e/auth.spec.ts` | `AC7: a second code request within 60 s shows the wait message and sends no second email` | e2e |
-| AC8 | sign-out: sign-in screen, no `sb-*` cookie, reload/Back show sign-in and no to-do, replayed old cookies get 401, old refresh token refused (threat model 3.6; direct PostgREST not asserted) | `tests/e2e/auth.spec.ts` | `AC8: sign-out clears the session; ...` | e2e |
+| AC8 | sign-out: sign-in screen, no `sb-*-auth-token` cookie, reload shows sign-in, Back to an earlier list history entry (sign-out uses `location.replace`, so the test opens the list twice) shows sign-in and no to-do, replayed old cookies get 401, old refresh token refused (threat model 3.6; direct PostgREST not asserted) | `tests/e2e/auth.spec.ts` | `AC8: sign-out clears the session; ...` | e2e |
 | AC9 | signed out: list page shows sign-in, no to-do title in any response; list/read/create/change/delete API 401, DB unchanged | `tests/e2e/auth.spec.ts` | `AC9: signed out, the list page shows sign-in with no to-do data, ...` | e2e + abuse |
 | AC10 | "Buy milk" at top, not done, one DB row with A's id | `tests/e2e/todos.spec.ts` | `AC10: Add creates 'Buy milk' at the top, ...` | e2e |
 | AC11 | exactly A's 3 newest first; none of B's titles in any response or the page | `tests/e2e/todos.spec.ts` | `AC11: the list shows exactly the user's 3 to-dos newest first ...` | e2e |
 | AC11 (API) | `GET /api/todos` order = `created_at desc, id desc` | `tests/e2e/api.spec.ts` | `list order is newest first (created_at desc, id desc)` | integration (HTTP) |
-| AC12 | check/uncheck: checkbox, strike-through, DB, after reload | `tests/e2e/todos.spec.ts` | `AC12: checking marks done ...` | e2e |
+| AC12 | check/uncheck (click, then wait for the server-confirmed state: the checkbox is controlled by the server's answer), strike-through, DB, after reload | `tests/e2e/todos.spec.ts` | `AC12: checking marks done ...` | e2e |
 | AC13 | edit title; done and owner unchanged | `tests/e2e/todos.spec.ts` | `AC13: editing 'Buy milk' to 'Buy oat milk' ...` | e2e |
 | AC14 | delete: gone from list, DB, after reload | `tests/e2e/todos.spec.ts` | `AC14: delete removes the to-do ...` | e2e |
-| AC15 | sign out, sign in on a new context: same to-dos and done states | `tests/e2e/todos.spec.ts` | `AC15: after sign-out and a new sign-in in a new browser context, ...` | e2e |
+| AC15 | first sign-in through the UI (Mailpit code), create + toggle, sign out; second sign-in on a new context with a real session for the same address made through the admin code (a second UI code request within 60 s is refused by design, AC7, and an admin-generated code also counts as a send): same to-dos and done states | `tests/e2e/todos.spec.ts` | `AC15: after sign-out and a new sign-in in a new browser context, ...` | e2e |
 | AC16 | 1 char, 200 chars, 200 emoji, "  Buy milk  " accepted on create and edit, stored trimmed | `tests/e2e/abuse/row5-input.spec.ts`; `tests/e2e/todos.spec.ts` | `AC16: 1 char, 200 chars, 200 emoji and '  Buy milk  ' ...`; `AC16 (UI): ...` | abuse (HTTP) + e2e |
 | AC17 | 14 invalid titles (empty, whitespace kinds, 201, 201 after trim, 201 emoji, number, null, true, array, object, missing) on create and edit: 400 `validation_failed`, no change; UI: message + input kept | `tests/e2e/abuse/row5-input.spec.ts`; `tests/e2e/todos.spec.ts` | `AC17/AC26: create with a title that is <case> ...` (14), `AC17/AC26: edit with a title that is <case> ...` (14); `AC17 (UI): create with <case> ...` (3), `AC17 (UI): editing to whitespace only or 201 characters ...` | abuse + e2e |
 | AC18 | non-JSON 400 `invalid_json`; >10 KB 413 (also multi-byte); non-uuid id 400 `invalid_id` on read/edit/delete; non-boolean done 400 | `tests/e2e/abuse/row5-input.spec.ts` | `AC18: a body that isn't JSON ...`, `AC18: a body over 10 KB ...`, `AC18: an id that isn't a uuid ...`, `AC18/AC26: done = <v> ...` (5), `AC18/AC26: an empty change body {} ...` | abuse |
@@ -92,7 +95,7 @@ All of it is in one place, `tests/e2e/support/ui.ts`; a different name or path i
 | AC22 | A on B's X: read/toggle/edit/delete 404 with the same body as a missing id, no field of X, X unchanged | `tests/e2e/abuse/row2-idor.spec.ts` | `AC22: A's read, toggle, edit and delete of B's to-do return the same 404 ...` | abuse |
 | AC23 | REST with A's token on B's X: 0 rows, unchanged | `tests/e2e/abuse/row2-idor.spec.ts` | `AC23: with A's token, Supabase REST select/update/delete of B's to-do affect 0 rows` | abuse |
 | AC24 | client bundle scan; only `NEXT_PUBLIC_*` read; no service-role code path | `scripts/verify.sh` ("client bundle has no server secrets"); `tests/integration/app-code-static.test.ts` | `T4: no service-role or secret key reference`; `T4: process.env reads only ...` | verify.sh + static |
-| AC25 | full journey: no secret (service-role, secret key, JWT secret, S3 secret, DB password) in any request/response; only anon/publishable apikey | `tests/e2e/journey.spec.ts` | `AC25 + AC36: full journey leaks no secret, ...` | e2e |
+| AC25 | full journey: no secret (service-role key, secret key, JWT secret, S3 secret; DB password only if it is a real secret of 16+ characters: the local default is the word `postgres`, which legitimately appears in client JS) in any request/response; only anon/publishable apikey | `tests/e2e/journey.spec.ts` | `AC25 + AC36: full journey leaks no secret, ...` | e2e |
 | AC26 | every AC17/AC18 case to every to-do API | `tests/e2e/abuse/row5-input.spec.ts` | all `AC17/AC26`, `AC18/AC26`, `AC26: a create body that is an array, ...` | abuse |
 | AC27 | code request with `data {role: admin, is_admin: true}`: `raw_app_meta_data` has no role/admin; user sees only own (empty) list, 404 on A's to-do via API, 0 rows via REST | `tests/e2e/abuse/row8-mass-assignment.spec.ts` | `AC27: a code request with data {role: admin, is_admin: true} gives a normal user ...` | abuse |
 | AC28 | create with `user_id`, `id`, `done`, `created_at`, `updated_at`, unknown, `role`, `__proto__`: 400, no row | `tests/e2e/abuse/row8-mass-assignment.spec.ts` | `AC28: create with any field besides title -> 400 and no row` | abuse |
@@ -104,7 +107,7 @@ All of it is in one place, `tests/e2e/support/ui.ts`; a different name or path i
 | AC34 | 4 payloads created and edited in the UI: literal text in list and edit field, `window.__xss` undefined, no dialog, stored unchanged; no `dangerouslySetInnerHTML` | `tests/e2e/abuse/row11-xss.spec.ts`; `tests/integration/app-code-static.test.ts`; verify.sh | `AC34: script/HTML titles created and edited in the UI ...`; `AC34: no dangerouslySetInnerHTML anywhere in app code` | abuse + static |
 | AC35 | `/`, sign-in, list (signed in), 404, API (401 and 200): exactly one CSP equal to the threat model string, nonce, no `'unsafe-inline'`/`'unsafe-eval'` in script-src; five 2b headers; two requests differ | `tests/e2e/csp.spec.ts`; `tests/integration/csp.test.ts`; `tests/integration/security-headers.test.ts` | `AC35 + N4: /, sign-in, list, 404 and an API response each carry one exact CSP ...`; `AC35: two requests to the same page get different nonces`; N1 tests; N3 tests | e2e (HTTP) + unit + static |
 | AC36 | journey AC1/10/12/13/14/8 on the production build: auth calls reach Supabase (connect-src), no CSP violation, no CSP console error, no page error | `tests/e2e/journey.spec.ts` | `AC25 + AC36: full journey ...` | e2e |
-| AC37 | inline script without nonce (DOM-inserted, and in the served HTML) doesn't run; `securitypolicyviolation` for `script-src(-elem)`; console error | `tests/e2e/csp.spec.ts` | `AC37: an inline script without the nonce, added to the DOM, ...`; `AC37: an inline script without the nonce in the served HTML ...` | e2e |
+| AC37 | injected into the served list-page HTML (CSP header kept): an inline `<script>` without nonce, one with a guessed nonce, an inline `onerror` handler: none runs; `securitypolicyviolation` for `script-src(-elem/-attr)`; console error. Not via `page.evaluate()`: Chromium exempts DevTools-protocol script insertion from CSP (observed: even a `data:` script ran), so that would test the tool | `tests/e2e/csp.spec.ts` | `AC37: <case> in the served list page does not run and fires a script-src violation` (3) | e2e |
 | AC38 | RLS on, four owner policies for `authenticated`, every public table has RLS | `tests/e2e/abuse/row14-database.spec.ts`; pgTAP S3/S4; verify.sh | `AC38: public.todos has RLS enabled and four owner-only policies for authenticated` | abuse (DB) + pgTAP |
 | AC39 | anon key, no token: select/insert/update/delete get nothing | `tests/e2e/abuse/row14-database.spec.ts`; pgTAP N1 | `AC39: the anon key without a user token can't read, insert, update or delete to-dos` | abuse + pgTAP |
 | AC40 | exact grants, EXECUTE on trigger function | pgTAP G1-G5 (db-builder) | `supabase/tests/03_todos_test.sql` | pgTAP |
@@ -144,10 +147,10 @@ shapes` and `unsupported methods give 405 in the error format`.
 | C2 | no Origin / `Origin: null`: 403 | `tests/e2e/abuse/csrf.spec.ts` | `C2: no Origin header -> 403 ...`; `C2: Origin null -> 403 ...` | abuse |
 | C3 | `text/plain`, form-urlencoded, multipart, none: 415 `unsupported_media_type`, DB unchanged | `tests/e2e/abuse/csrf.spec.ts` | `C3: same-origin request with Content-Type <type> ...` (4) | abuse |
 | C4 | session cookie `SameSite=Lax`, `path=/` after a real UI sign-in (http local, so `Secure` off) | `tests/e2e/auth.spec.ts` | `AC1 + C4: ...` | e2e |
-| C4 (HTTPS) | the Secure-flag function (3.2: pure function of protocol/host) gives `secure: true` for https and a real host | **not written yet**: needs the function's name and module from frontend-dev/backend-dev's Handoff | - | unit (pending) |
-| C5 | post-login return path | **N/A unless frontend-dev adds a return path** (threat model 5: "only if"); if added, qa-test adds `https://evil.example`, `//evil.example`, `/\evil.example` -> list page | - | e2e (conditional) |
+| C4 (HTTPS) | `cookieOptionsFor(hostname)`: loopback hosts `secure: false`, every other host (incl. empty) `secure: true`, SameSite=Lax, path=/; independent of NODE_ENV | `tests/integration/cookie-options.test.ts` | `C4: loopback host %s ...` (5), `C4 (HTTPS case): non-loopback host %j ...` (6), `C4: NODE_ENV=%s does not change the result` (3) | unit |
+| C5 | post-login return path: **N/A**, the frontend-dev build has no return path (always `/` after sign-in). If one is added, qa-test adds `https://evil.example`, `//evil.example`, `/\evil.example` -> list page | - | - | N/A |
 | N1 | `buildCsp` prod/dev strings exact, no `'unsafe-inline'`, no prod `'unsafe-eval'`, H3/H5/H6, nonce extractable by Next's regex | `tests/integration/csp.test.ts` | all (16) | unit |
-| N2 | 1,000 unique nonces matching `^[A-Za-z0-9+/]{22}==$` as a unit test needs an exported nonce function (none in the contract); covered live instead: 30 requests, 30 distinct well-formed nonces | `tests/e2e/csp.spec.ts` | `N2 (live): 30 requests give 30 distinct 16-byte base64 nonces` | e2e (HTTP) |
+| N2 | `generateNonce()`: 1,000 unique, each `^[A-Za-z0-9+/]{22}==$` (16 bytes); live: 30 requests give 30 distinct well-formed nonces | `tests/integration/csp.test.ts`; `tests/e2e/csp.spec.ts` | `N2: 1,000 nonces are unique ...`, `N2: a generated nonce is accepted by buildCsp ...`; `N2 (live): 30 requests ...` | unit + e2e (HTTP) |
 | N3 | no CSP in `headers()` (any env), five headers exact, `cacheComponents === false`, no `partialPrefetching` | `tests/integration/security-headers.test.ts` | `N3/H1: ...`, `N3/H2: <header> ...` (5), `N3: no rule in headers() sets Content-Security-Policy ...` (4), `N3: the five headers don't depend on ...`, `6.5: cacheComponents is false and partialPrefetching is not set ...`, `H1/AC2: ...` (5) | static |
 | N4 | every `<script>` carries the header's nonce; a client-sent CSP / `x-nonce` request header can't choose it; proxy session refresh keeps CSP + sets cookie (6.4) | `tests/e2e/csp.spec.ts` | `AC35 + N4: ...`; `N4: a client-sent Content-Security-Policy / x-nonce request header cannot choose the nonce`; `N4 (6.4): a proxy session refresh keeps the CSP header and sets the new session cookie` | e2e (HTTP) |
 | N5 | AC36, AC37 | see above | | e2e |
@@ -160,4 +163,3 @@ shapes` and `unsupported methods give 405 in the error format`.
 - AC46: release process, recorded by git-release / the person.
 - AC32(b) P1-revised and P2: production, run by the person only (AGENT_RULES §4).
 - Dev-mode CSP (`'unsafe-eval'` only in `next dev`): unit-tested through `buildCsp({ isDev: true })`; not run live.
-- C4 Secure flag on HTTPS: pending the helper's name (see the table).

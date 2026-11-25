@@ -149,60 +149,47 @@ test.describe("nonce CSP headers (AC35, N4, N2, N6)", () => {
   });
 });
 
-test.describe("nonce CSP in the browser (AC37)", () => {
-  test("AC37: an inline script without the nonce, added to the DOM, does not run and fires a script-src violation", async ({ page, context, userA }) => {
-    const violations: string[] = [];
-    const consoleErrors: string[] = [];
-    await page.exposeFunction("__qaReportCsp", (v: string) => {
-      violations.push(v);
-    });
-    await page.addInitScript(() => {
-      document.addEventListener("securitypolicyviolation", (e) => {
-        (window as unknown as { __qaReportCsp: (v: string) => void }).__qaReportCsp(e.violatedDirective);
-      });
-    });
-    page.on("console", (m) => {
-      if (m.type() === "error") consoleErrors.push(m.text());
-    });
-    await addSession(context, userA.cookies);
-    await page.goto(LIST_PATH);
-    await expect(ui.newTitle(page)).toBeVisible();
-    await page.evaluate(() => {
-      const s = document.createElement("script");
-      s.textContent = "window.__csp = 1";
-      document.body.appendChild(s);
-    });
-    await expect.poll(() => violations.length).toBeGreaterThan(0);
-    expect(await page.evaluate(() => (window as unknown as { __csp?: number }).__csp)).toBeUndefined();
-    expect(violations.every((v) => v === "script-src" || v === "script-src-elem"), `violated: ${violations.join(", ")}`).toBe(true);
-    await expect.poll(() => consoleErrors.some((e) => /content security policy/i.test(e))).toBe(true);
-  });
+// AC37. The injection goes into the real served HTML of the list page (its headers, so its CSP, are kept).
+// Not via page.evaluate(): Chromium exempts script elements created through the DevTools protocol from CSP
+// (observed 2026-11-25: even a data: script added that way ran), so that would test the tool, not the app.
+const INJECTIONS: [string, string, string, string[]][] = [
+  ["an inline <script> without the nonce", "<script>window.__csp = 1</script>", "__csp", ["script-src", "script-src-elem"]],
+  ["an inline <script> with a guessed nonce", `<script nonce="AAAAAAAAAAAAAAAAAAAAAA==">window.__csp = 2</script>`, "__csp", ["script-src", "script-src-elem"]],
+  ["an inline event handler (img onerror)", `<img src="/qa-missing.png" onerror="window.__csp = 3">`, "__csp", ["script-src", "script-src-attr"]],
+];
 
-  test("AC37: an inline script without the nonce in the served HTML does not run and fires a violation", async ({ page, context, userA }) => {
-    const violations: string[] = [];
-    await page.exposeFunction("__qaReportCsp", (v: string) => {
-      violations.push(v);
-    });
-    await page.addInitScript(() => {
-      document.addEventListener("securitypolicyviolation", (e) => {
-        (window as unknown as { __qaReportCsp: (v: string) => void }).__qaReportCsp(e.violatedDirective);
+test.describe("nonce CSP in the browser (AC37)", () => {
+  for (const [label, snippet, flag, directives] of INJECTIONS) {
+    test(`AC37: ${label} in the served list page does not run and fires a script-src violation`, async ({ page, context, userA }) => {
+      const violations: string[] = [];
+      const consoleErrors: string[] = [];
+      await page.exposeFunction("__qaReportCsp", (v: string) => {
+        violations.push(v);
       });
+      await page.addInitScript(() => {
+        document.addEventListener("securitypolicyviolation", (e) => {
+          (window as unknown as { __qaReportCsp: (v: string) => void }).__qaReportCsp(e.violatedDirective);
+        });
+      });
+      page.on("console", (m) => {
+        if (m.type() === "error") consoleErrors.push(m.text());
+      });
+      await addSession(context, userA.cookies);
+      await page.route(
+        (url) => url.origin === APP_ORIGIN && url.pathname === LIST_PATH,
+        async (route) => {
+          if (route.request().resourceType() !== "document") return route.continue();
+          const response = await route.fetch();
+          const html = (await response.text()).replace("</body>", `${snippet}</body>`);
+          await route.fulfill({ response, body: html });
+        },
+      );
+      await page.goto(LIST_PATH);
+      await expect(ui.newTitle(page)).toBeVisible();
+      await expect.poll(() => violations.length).toBeGreaterThan(0);
+      expect(await page.evaluate((f) => (window as unknown as Record<string, unknown>)[f], flag)).toBeUndefined();
+      expect(violations.every((v) => directives.includes(v)), `violated: ${violations.join(", ")}`).toBe(true);
+      await expect.poll(() => consoleErrors.some((e) => /content security policy/i.test(e))).toBe(true);
     });
-    await addSession(context, userA.cookies);
-    // Inject into the real response for the list page document; its headers (and so its CSP) are kept.
-    await page.route(
-      (url) => url.origin === APP_ORIGIN && url.pathname === LIST_PATH,
-      async (route) => {
-        if (route.request().resourceType() !== "document") return route.continue();
-        const response = await route.fetch();
-        const html = (await response.text()).replace("</body>", "<script>window.__csp2 = 1</script></body>");
-        await route.fulfill({ response, body: html });
-      },
-    );
-    await page.goto(LIST_PATH);
-    await expect(ui.newTitle(page)).toBeVisible();
-    await expect.poll(() => violations.length).toBeGreaterThan(0);
-    expect(await page.evaluate(() => (window as unknown as { __csp2?: number }).__csp2)).toBeUndefined();
-    expect(violations.every((v) => v === "script-src" || v === "script-src-elem"), `violated: ${violations.join(", ")}`).toBe(true);
-  });
+  }
 });

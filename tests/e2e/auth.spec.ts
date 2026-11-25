@@ -28,7 +28,7 @@ test.describe("sign-in (AC1-AC7)", () => {
     await waitForMessageCount(email, 1);
     await enterCode(page, await latestCode(email));
     await expect(ui.newTitle(page)).toBeVisible();
-    await expect(page.getByText(email, { exact: true })).toBeVisible();
+    await expect(page.getByText(`Signed in as ${email}`, { exact: true })).toBeVisible();
     expect(await countMessagesTo(email), "exactly one email").toBe(1);
 
     // C4 (threat model 5): SameSite=Lax; Secure is off only because the e2e build is served over http://127.0.0.1.
@@ -37,6 +37,7 @@ test.describe("sign-in (AC1-AC7)", () => {
     for (const c of cookies) {
       expect(c.sameSite, `${c.name} SameSite`).toBe("Lax");
       expect(c.path, `${c.name} path`).toBe("/");
+      expect(c.secure, `${c.name} Secure (loopback host, cookieOptionsFor)`).toBe(false);
     }
   });
 
@@ -144,7 +145,11 @@ test.describe("sign-out and signed-out access (AC8, AC9)", () => {
     const title = `AC8 private ${user.id.slice(0, 8)}`;
     seedTodo(user.id, title);
     await addSession(context, user.cookies);
+    // Two history entries of the list: sign-out replaces the current entry (location.replace), so Back must
+    // land on the earlier list entry, which is the page that could show cached to-dos.
     await page.goto(LIST_PATH);
+    await expect(ui.item(page, title)).toBeVisible();
+    await page.goto(`${LIST_PATH}?again=1`);
     await expect(ui.item(page, title)).toBeVisible();
     const before = (await sessionCookiesIn(context)).map((c) => ({ name: c.name, value: c.value }));
     const oldRefresh = sessionFromCookies(before).refresh_token;
