@@ -1,96 +1,114 @@
-Result: PASS
+Result: FAIL
 
-# Security gate: task 0 (Phase 0 bootstrap)
+# Security gate: task 0, PR #2 (gate hardening)
 
 - **Reviewer:** security (fresh context, no builder conversation)
 - **Date:** 2026-11-25
-- **Branch / HEAD reviewed:** `ci/0-phase0-fixes` @ `195834a` (full tree as of HEAD, including the Phase 0 commits already on `main`: `d3aa366`, `b69d33e`, plus the branch commits `d2a77b5`, `10f8be1`, `1c80e60`, `195834a`)
-- **Scope reviewed:** `.github/workflows/ci.yml`, `.github/workflows/drift.yml`, `scripts/verify.sh`, `scripts/bootstrap-check.sh`, `scripts/gate-check.sh`, `scripts/ci/install-gitleaks.sh`, `.gitignore`, `supabase/.gitignore`, `.env.example`, `.npmrc`, `package.json`, `supabase/config.toml`, `supabase/migrations/20261125104017_init.sql`, `supabase/tests/00_bootstrap_test.sql`, `next.config.ts`, `app/*`.
+- **Branch / HEAD reviewed:** `ci/0-gate-hardening` @ `5a28aaf`, diff `git diff origin/main...HEAD` (base `main` @ `35a461c`)
+- **Scope reviewed:** `.github/workflows/gate.yml` (new), `.github/workflows/ci.yml`, `.github/workflows/drift.yml`, `scripts/gate-check.sh`, `scripts/verify.sh`, `rules/AGENT_RULES.md`, `ORCHESTRATOR.md`, `roles/{security,code-reviewer,devops-cicd,git-release}.md`, `tasks/0/TASK_BRIEF.md`, `tasks/decisions.md`, plus what they interact with on `main`.
 
-The verdict covers the baseline rows that apply to task 0. Findings below that don't break an
-applicable row are listed as should-fix with an owner; none of them is exploitable in the code as
-it stands, but two of them (S1, S2) weaken the merge-approval process itself and should be dealt
-with before GitHub's required review count is set to 0.
+One hole in the new trusted gate (F1) lets a PR reach `main` with a green `merge-gate` and no
+fresh gate files and no `framework-change-approved` label. The fix is small. Everything else is
+should-fix.
 
 ## Applicable baseline rows
 
-The brief (`tasks/0/TASK_BRIEF.md`, "Security rows that apply") lists only row 13. Task 0 has no
-app feature, no route, no table, no auth flow and no client code that reads env vars, so rows 1-12
-have nothing to check yet. Rows 4, 6, 7, 10, 12 are proposed N/A in `PROJECT_CONTEXT.md`; security
-confirms or rejects that in the first feature's threat model, not here. Row 14 (RLS) is checked
-below as well, because Phase 0 ships the RLS check that every later task depends on.
+Row 13 (brief) and the merge-approval control itself (ORCHESTRATOR 3a, the control this PR
+changes). Rows 1-12 and 14 have nothing new in this diff (no app code, no route, no table, no
+migration).
 
 ### Row 13: `.env` in Git
 
 | Control | Where | Proof | Result |
 |---|---|---|---|
-| `.gitignore` ignores `.env*` except `.env.example` | `.gitignore:2-3` (also `supabase/.gitignore:5-8` for `.env.keys`, `.env.local`, `.env.*.local`; `.gitignore:26` `supabase/.env`; `.gitignore:37` `*.pem`) | `git ls-files` lists no `.env` file other than `.env.example`; `bootstrap-check.sh` "no .env files tracked by git" PASS | PASS |
-| `.env.example` has names only | `.env.example:1-5` | Every variable is empty (`NAME=`) | PASS |
-| CI secret scan on full history | `.github/workflows/ci.yml:87-100` (`secrets` job, `fetch-depth: 0`, `gitleaks detect --redact`), gitleaks pinned `ci.yml:18` (8.30.1), checksum-verified install `scripts/ci/install-gitleaks.sh:9-12` | CI run 45602038832 on HEAD `195834a`: job `secrets` = success. Also `verify` (which runs gitleaks inside verify.sh) = success | PASS |
-| Secret scan in verify.sh | `scripts/verify.sh:151-173` (tracked-env check, gitleaks if installed, pattern fallback; fails in CI if gitleaks is missing, `verify.sh:170`) | Local run: "no .env files tracked" PASS, "basic secret pattern scan" PASS (gitleaks not installed locally, so the fallback ran) | PASS |
-| bootstrap-check (abuse test named by the baseline) | `scripts/bootstrap-check.sh:47-52` (.gitignore + tracked env), `:85` (CI secret scan present) | Local run: all three PASS | PASS |
+| verify.sh gitleaks exit mapping | `scripts/verify.sh:156-161` | `--exit-code 99` makes 99 mean "leaks found"; gitleaks' own fatal errors exit 1 and now land in `*) could not run`, which is also `bad`, so both fail closed and are told apart. Mapping correct. gitleaks not installed locally, so the fallback scan ran (PASS). | PASS |
+| CI secret scan | `ci.yml` `secrets` job (unchanged) | default exit code, any non-zero fails | PASS |
+| no `.env` tracked | verify.sh | "no .env files tracked" PASS | PASS |
 
-Abuse test for row 13 per the baseline is "bootstrap-check + CI secret scan": both present and green.
-
-### Row 14: Query your database (RLS)
+### Merge-approval control (gate.yml + gate-check.sh)
 
 | Control | Where | Proof | Result |
 |---|---|---|---|
-| Static RLS check on every `create table` in migrations | `scripts/verify.sh:135-146` | Local verify.sh: "RLS enabled on every public table (static check)" PASS | PASS |
-| Dynamic RLS check (pgTAP) on the built database | `supabase/tests/00_bootstrap_test.sql:9-17` (`is_empty` on public tables with `relrowsecurity = false`) | `supabase test db` PASS locally and in CI (`db-check` = success on `195834a`) | PASS |
-| No tables yet | `supabase/migrations/20261125104017_init.sql:4` (`select 1;`) | Local DB query: no tables, views or matviews in `public` / `graphql_public` | PASS |
-| Supabase security advisors | n/a | **N/A:** there is no Supabase cloud project yet (hard constraint in `PROJECT_CONTEXT.md`), so advisors can't run. Not a failure; must run in the first gate after the project exists. | N/A |
+| Gate runs from base, PR code never executed | `gate.yml:6-29` | `pull_request_target`, checkout of base with `persist-credentials: false`, `permissions: contents: read`, no secrets; PR head only fetched (`:23`) and read with `git cat-file`/`git show`/`git log`/`git diff --name-only` (no textconv, no hooks, no checkout). Scratch test: PR replacing `scripts/gate-check.sh` with `exit 0` is still judged by the base script and FAILs. | PASS |
+| No script injection | `gate.yml:21-29` | PR number, `base_ref`, `head.ref` and the label boolean go through `env:` and quoted `"$VAR"`, never `${{ }}` inside `run:`. Branch `feat/9-evil$(id)\`id\`` printed literally; ID limited to `[A-Za-z0-9]+` (`gate-check.sh:28`), `feat/../../x` rejected. | PASS |
+| Action pin | `gate.yml:16` | `git ls-remote --tags https://github.com/actions/checkout v7.0.1` = `3d3c42e5aac5ba805825da76410c181273ba90b1`, matches. | PASS |
+| First non-empty line is the verdict | `gate-check.sh:38-40` | Scratch: `Result: PASS`, leading blank lines + CRLF, `**Result:** PASS`, extra spaces: PASS. `Result: FAIL` then `Result: PASS`, BOM, heading first, `PASSED`: FAIL. | PASS |
+| Freshness | `gate-check.sh:47-58` | Scratch: code after gate (linear), backdated code commit, backdated side branch merged after the gate, gate edited inside the merge commit: all FAIL; re-gate in a later commit: PASS. | PASS |
+| No merge-base fails | `gate-check.sh:47-49` | `--base nonexistent` → FAIL. | PASS |
+| Label for framework paths | `gate-check.sh:61-73` | This branch: FAIL listing 11 files without the label; PASS on that line with `FRAMEWORK_CHANGE_APPROVED=1`. Rename out of `scripts/` still listed. | PASS |
+| **Base branch the gate judges against** | `gate.yml:8`, `:26`, `:29` | **F1 below** | **FAIL** |
 
-Gap to note for later (not a fail now): the pgTAP test checks `relrowsecurity` only, and
-`database-and-deploy.md` rule 13 also requires at least one policy per table. See S7.
+## Automated results (local, HEAD `5a28aaf`)
 
-## Automated results (run locally on HEAD `195834a`, 2026-11-25)
-
-| Check | Command | Result |
-|---|---|---|
-| Dependency audit | `npm audit --audit-level=high` (Node 24.11.0, npm 11.6.1) | `found 0 vulnerabilities`, exit 0 |
-| Done gate incl. RLS, DB build, tests, lint | `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase on 55420-55429) | `verify.sh: PASS 18/18 (1 skipped)` (skip: `test:e2e`, no script, not required) |
-| Phase 0 gate | `bash scripts/bootstrap-check.sh` | `FAIL 1 of 31` (only "DB deploy path connected"; known, waits for the person's Supabase project). Not a security finding. |
-| Secret pattern review, tracked files | grep over `git ls-files` for Stripe, Anthropic/OpenAI, AWS (AKIA/ASIA), private-key blocks, Postgres URLs with password, JWTs (`eyJ...`), GitHub tokens (`ghp_`/`github_pat_`), Slack, Google API keys, Supabase `sb_secret_`/`sbp_`, and generic `password/secret/token/api_key = "<literal>"` | 0 hits in tracked files; 0 hits in `git log -p --all` |
-| gitleaks | not installed locally | Ran in CI: `secrets` job success on `195834a` (full history, default rules, no `.gitleaks.toml`) |
-| Action pinning | `git ls-remote --tags` for each action | `actions/checkout@3d3c42e…` = v7.0.1, `actions/setup-node@949feb2…` = v7.1.0, `actions/github-script@3a2844b…` = v9.0.0 (peeled tag). All pins are full commit SHAs and match their version comments. |
-| Branch protection (read-only `gh api`) | `repos/{owner}/{repo}/branches/main/protection` | required reviews 1, required checks `verify`, `db-check`, `secrets`, strict, force-push off, **enforce_admins off**, `gate` **not** a required check yet. See S2. |
-
-## Manual review
-
-Checked and fine:
-
-- **Workflow permissions:** `ci.yml:9-10` `contents: read` for all jobs. `drift.yml:11-13` `contents: read`, `issues: write` (needed for the drift issue). No `pull_request_target`, no `workflow_run` on PR code.
-- **Script injection:** no `${{ github.event.* }}` attacker-controlled text (PR title, body, branch name) is interpolated into a `run:` block. The branch name reaches scripts only through `GITHUB_HEAD_REF` as an env var (`gate-check.sh:17`, `verify.sh:62`), and the task id is restricted to `[A-Za-z0-9]+` before it's used in a path. `ci.yml:47` interpolates a boolean expression on labels into `env:`, not into shell.
-- **Secrets in CI:** `ci.yml` uses no secrets. Fork PRs (the repo is public) get a read-only token and no secrets. `drift.yml` uses secrets only on `schedule` / `workflow_dispatch`, never on PRs; gitleaks runs with `--redact`.
-- **Supply chain:** `npm ci` from the committed lockfile everywhere; exact versions (`.npmrc:1-2`, `package.json`); pinned Node (`.nvmrc`), npm (`packageManager`), Supabase CLI (3.2.0), gitleaks (8.30.1, sha256 checked).
-- **Drift workflow is read-only:** `db diff --remote` only, no `db push`, `execute_sql` or migration apply.
-- **App scaffold:** `app/*` has no `process.env` use, no `"use client"`, no `dangerouslySetInnerHTML`, no fetch. No route handlers, no server actions, no uploads, no LLM calls. No new env var reaches the client.
-- **Migration:** `select 1;` only, no SQL built from strings.
+| Check | Result |
+|---|---|
+| `npm audit --audit-level=high` | `found 0 vulnerabilities`, exit 0 |
+| `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker) | `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script) |
+| `bash scripts/gate-check.sh` | FAIL as expected: gate files older than the last code commit, label absent. With `FRAMEWORK_CHANGE_APPROVED=1`: only the two freshness FAILs remain. Bad args (`--base` without value, `--foo`) exit 2. |
+| Supabase security advisors | N/A: no cloud project yet (unchanged from the PR #1 gate) |
+| RLS check | verify.sh static check PASS, `supabase test db` PASS (no tables) |
 
 ## Findings
 
 ### FAIL-worthy
 
-None.
+**F1. A PR can get a green `merge-gate` by being judged against a branch other than `main`,
+then retargeted to `main`.**
+`.github/workflows/gate.yml:26` takes `BASE_REF` from `github.base_ref` and `:29` passes
+`--base "origin/${BASE_REF}"`; `:8` doesn't list the `edited` event, which is what GitHub sends
+when a PR's base branch is changed.
 
-### Should-fix (not blocking task 0)
+How: push branch `staging` = `main` + unreviewed code (and/or workflow/script edits). Open the
+task PR `feat/0-x` = `staging` + one commit under `tasks/**`, with base `staging`. The merge-base is
+the tip of `staging`, so `LAST_CODE` is empty (only `tasks/**` changed) and the protected-path diff
+is empty; `specs/0/security-gate.md` and `review.md` from PR #1 already say PASS/APPROVE. Result:
+`merge-gate` PASS. Then change the PR's base to `main`: no `merge-gate` re-run (no `edited`
+trigger), so the green check stays on the head SHA. `verify`, `db-check`, `secrets` don't depend on
+the base (verify.sh diffs against `origin/main` and its scope check reads the PR's own brief, S5),
+and the head is up to date with `main`, so the PR is mergeable with no fresh gate files and no
+label. Reproduced in a scratch clone: the same head gives `gate-check: PASS` with
+`--base origin/staging` and `FAIL` (both freshness checks + label) with `--base origin/main`. The
+retarget-keeps-the-check step is GitHub behavior that I couldn't run here (no pushes); it is how
+check runs work (bound to the head SHA, not the base).
+
+Who could do it: any agent with push access (git-release merges, per `roles/git-release.md:8`).
+This PR introduces it: the old gate always used `origin/main`.
+
+Fix (devops-cicd; framework file, so the person approves): judge every PR against `main` no matter
+what its base is, e.g. `gate.yml:29` `--base origin/main` (or the default branch via
+`github.event.repository.default_branch` in `env:`), and add `edited` to `types` at `:8` so a
+retarget re-runs the gate. Optionally FAIL outright when `BASE_REF` isn't `main`.
+
+### Should-fix
 
 | # | File:line | Problem | Why it matters | Fix | Owner |
 |---|---|---|---|---|---|
-| S1 | `.github/workflows/ci.yml:105-115`, `scripts/gate-check.sh` (whole file); same for `ci.yml:44-48` + `scripts/verify.sh` | The `gate` and `verify` jobs run the scripts **from the PR's own checkout**. A PR that edits `scripts/gate-check.sh` (e.g. to `exit 0`) or the `gate` job in `ci.yml` passes its own merge-approval check without any security gate or review file. | Once GitHub's required review count is 0 (`ORCHESTRATOR.md` 3a, `tasks/decisions.md`), the `gate` check is the only approval, and it is self-modifiable by the change it approves. A builder agent could merge unreviewed code. | Run the gate logic from the base branch, not the PR head: e.g. a separate workflow on `pull_request_target` that checks out **only** `main` for the script and reads the PR's gate files with `git show <pr-sha>:specs/<id>/...` (never executes PR code, `permissions: contents: read`, no secrets). Or make `gate-check.sh` fail when the PR diff touches `scripts/gate-check.sh`, `scripts/verify.sh` or `.github/workflows/**` unless the person adds a label (still self-modifiable, so weaker). Decide before setting required reviews to 0, or record the accepted risk in `tasks/decisions.md`. | devops-cicd (the person decides) |
-| S2 | GitHub settings (read via `gh api`); `ORCHESTRATOR.md:37`, `:65-67` | Branch protection doesn't match the documented model: `gate` is not a required check, reviews are still 1, and `enforce_admins` is off, so the single admin account can merge past every check. | The documented approval model isn't enforced yet, and admin bypass makes all required checks advisory for the owner account. | After this PR merges: add `gate` to the required checks, set reviews to 0 only together with S1, and turn on "Do not allow bypassing the above settings" / enforce admins. Re-run `bootstrap-check.sh` (it doesn't check for `gate` or enforce_admins today, see S3). | the person (settings); devops-cicd (S3) |
-| S3 | `scripts/bootstrap-check.sh:71-74` | Only checks that `required_pull_request_reviews` and `required_status_checks` keys exist, not that `verify`, `db-check`, `secrets`, `gate` are the required contexts, nor `enforce_admins`. | Someone can drop a required check or keep admin bypass on and Phase 0 still reports green (stop rule 3 never fires). | Check the contexts list contains all four job names and `enforce_admins.enabled == true`. | devops-cicd |
-| S4 | `scripts/gate-check.sh:27` | `grep -qE "^(\*\*)?Result:..."` accepts the result on **any** line, while `roles/security.md` says the **first** line is the verdict. A gate file whose first line is a FAIL verdict but which later contains a line with only the PASS verdict (e.g. a quoted example, or an old verdict left in) passes the gate. | A FAIL can be turned into a merge by an innocent or careless edit. | Read only line 1: `head -1 "$f" \| grep -qE "^Result: $2$"` (strip a trailing CR). Same for `review.md` per its contract. | devops-cicd |
-| S5 | `scripts/verify.sh:79` with `:72-73`; `scripts/gate-check.sh:37` (`:(exclude)tasks/**`) | The scope check reads "Allowed paths" from the brief in the PR's own working tree, and `tasks/*` is always in scope. A builder can widen its own allowed paths in the same PR. `gate-check.sh` also treats any change under `tasks/**` as non-code, so the brief can be edited after both gates. | Scope enforcement (AGENT_RULES rule 5) is self-modifiable. | Read the brief from the merge base when it exists there (`git show "$MERGE_BASE:$BRIEF"`), and fail if the PR changes the brief's "Allowed paths" block without a person-approved label. In gate-check, exclude only the Handoff section edits, or at least not the scope block. | devops-cicd (product-spec owns brief contents) |
-| S6 | `.github/workflows/drift.yml:24-28` (job-level `env` with secrets), `:30` (checkout), `:49` (`npm ci`) | `SUPABASE_ACCESS_TOKEN` and `SUPABASE_DB_PASSWORD` are in the environment of every step, including `npm ci`, which runs dependency install scripts (e.g. the `supabase` package's postinstall). `actions/checkout` also persists the `issues: write` token in `.git/config` by default. | A compromised dependency in the lockfile would get the production access token and DB password. | Move the secrets into `env:` of only the `link` and `db diff` steps; add `persist-credentials: false` to the checkouts in both workflows (none of them push). | devops-cicd |
-| S7 | `supabase/tests/00_bootstrap_test.sql:9-17`, `scripts/verify.sh:135-146` | RLS checks prove "RLS enabled" only. `database-and-deploy.md` rule 13 also requires at least one policy per table, and baseline row 14 requires "anon key can't read other users' rows". The static check is regex-based and misses tables created by `create table ... (like ...)`, `create table as`, partitions in other forms, or tables in other exposed schemas (`graphql_public`). | Fine for Phase 0 (no tables), but the first real table relies on these checks. The pgTAP test is the stronger control. | Extend the pgTAP test: every table in `public` has at least one row in `pg_policies`; check every schema listed in `config.toml` `[api] schemas`. Add the anon/other-user abuse test in the first feature (qa-test). | db-builder (pgTAP), devops-cicd (verify.sh), qa-test (abuse test) |
-| S8 | `.github/workflows/drift.yml:69-83` (issue body, `:75`); repo visibility is **public** | On drift, the schema diff (up to 60 KB) is posted into a GitHub issue, and `drift.yml:59` prints `diff.err` into the public log on failure. | Public issues disclose production schema, policies and function bodies to anyone; error text may include host/user details. Not secrets, but useful reconnaissance. | Post only a summary and the run link in the issue (the log or an artifact with short retention holds the diff), or make the repo private. | devops-cicd (the person decides on visibility) |
-| S9 | `scripts/ci/install-gitleaks.sh:9-11` | The checksum file is downloaded from the same release as the tarball, so it proves integrity in transit, not that the release wasn't replaced. | A compromised release (or retagged version) would pass. Lower risk than most, but it's the secret scanner. | Pin the expected sha256 of `gitleaks_8.30.1_linux_x64.tar.gz` in the repo (next to `GITLEAKS_VERSION`) and compare against it. | devops-cicd |
-| S10 | `supabase/config.toml:187` (`minimum_password_length = 6`), `:190` (no password requirements), `:219` (captcha commented out), `:232` (`enable_confirmations = false`), `:234` (`secure_password_change = false`), `:243` (`otp_expiry = 3600`), `:80-86` (network restrictions off) | Local defaults that are weak for a login app. They only affect production if someone runs `supabase config push`, but they are also the values the first auth feature will be tested against. | Baseline row 9 (rate limits, lockout, CAPTCHA, OTP expiry) and row 8 apply as soon as login lands. | Set the auth values in the first auth task's threat model (security) and config (devops-cicd); keep cloud settings in sync and recorded. | security (requirements), devops-cicd (config.toml) |
-| S11 | `next.config.ts:3-7` | No security headers (CSP, `X-Frame-Options`/`frame-ancestors`, `Referrer-Policy`, `X-Content-Type-Options`). | Baseline row 11 requires a CSP. No user content yet, so nothing to exploit today. | Add the headers block in the first feature task; security supplies the CSP content. | devops-cicd (headers block), security (CSP content) |
-| S12 | `scripts/verify.sh:176-177`, `:194-195` | Client-leak check only looks at `.tsx`/`.jsx` files that start with `"use client"`, so a `.ts` module imported by a client component isn't covered; the XSS check skips any file that merely contains the word `sanitize`. The bundle scan (`:181-190`) is the real control and needs the secret values in env, which CI doesn't set. | Weak signals that look like proof. | In CI, scan the built bundle for key patterns (JWT with `"role":"service_role"`, `sb_secret_`) instead of only for known env values; treat the source greps as hints. | devops-cicd |
-| S13 | `scripts/verify.sh:208-209` | Fixed log paths `/tmp/verify-<script>.log` (the DB log at `:232` already uses `TMPDIR`). | Minor: predictable temp path on a shared machine. | Use `mktemp` or `$TMPDIR`. | devops-cicd |
+| S14 | `.github/workflows/ci.yml` (any job), branch protection | **Check-name spoofing.** A PR can add a job named `merge-gate` to a `pull_request` workflow; it runs the PR's code and reports success under the same check name and the same app (GitHub Actions). The "expected source" setting can't tell two Actions workflows apart. If GitHub counts the newest run of that name (re-running the spoof after the real gate is easy), the real gate's FAIL, including the label check, is overridden. Not verified on GitHub. | It undoes the "a PR can't edit the gate that judges it" claim in `ORCHESTRATOR.md:69`. Not a regression: before this PR the whole gate was PR-controlled. | No clean fix for a personal repo (ruleset "require workflows" is org-only). Partial: make the trusted `gate-check.sh` FAIL when any workflow at the PR head other than `gate.yml` defines a job id or `name:` `merge-gate` (or `gate`). The person decides whether to accept the rest of the risk in `tasks/decisions.md`. | devops-cicd; the person decides |
+| S5 (open, now reproduced) | `scripts/gate-check.sh:51` (`:(exclude)tasks/**`) | A PR changing only `tasks/**` passes `merge-gate` with no fresh gate files: it reuses any old PASS/APPROVE under `specs/<id>/` from `main`. Scratch: branch `feat/0-sneaky` adding a row to `tasks/decisions.md` → `gate-check: PASS`. | `tasks/decisions.md` is where the person "accepts" a high vulnerability (`roles/security.md` rule 3) or a framework change; it can be written and merged with no gate at all. | Add `tasks/decisions.md` to the protected paths (`:64`), and when `LAST_CODE` is empty still require both gate files to be committed in `MB..HEAD`. | devops-cicd |
+| S15 | `scripts/gate-check.sh:64` | The protected list misses other control files: `.gitleaks.toml` (a PR can allowlist its own secret), `.github/**` outside `workflows/` (e.g. `CODEOWNERS`), `package.json` `scripts` and the lockfile (they run in `verify`), `supabase/config.toml`, `templates/**`, `AGENTS.md`. | Lets a PR weaken the checks that run on it without the person's label. | Extend the pathspec: `.github .gitleaks.toml package.json package-lock.json supabase/config.toml templates AGENTS.md tasks/decisions.md`. | devops-cicd |
+| S16 | `scripts/gate-check.sh:66`, `gate.yml:28` | The label isn't bound to a commit. Once the person adds `framework-change-approved`, later pushes with more workflow/script changes still pass the label check (only the gate files must be redone). | The person's approval covers a diff they may not have seen. | Process: the person removes and re-adds the label after reviewing each push. Or record the approved head SHA (e.g. in the label-add comment) and compare. | the person (process); devops-cicd |
+| S17 | `gate.yml:21-23` | Fetches `refs/pull/N/head` (whatever the head is *now*), not `github.event.pull_request.head.sha` (the commit the check is reported on). With fast pushes and no `concurrency`, a run can judge a newer commit than the one it reports on. | Low: the last push always gets its own run. Still, the check should judge exactly the commit it marks. | Pass `HEAD_SHA: ${{ github.event.pull_request.head.sha }}` via `env:`, fetch the PR ref, then FAIL unless `git rev-parse refs/pr/head` equals `$HEAD_SHA` (or `--head "$HEAD_SHA"`). Add `concurrency: merge-gate-${{ github.event.pull_request.number }}`, cancel in progress. | devops-cicd |
+| S18 | `.github/workflows/drift.yml:72-73` | The issue no longer pastes the diff (good), but the step `tee`s the diff and `cat`s `diff.err` into the run log, and run logs of a public repo are public. `roles/devops-cicd.md` (step 5) and the issue text say the diff is kept out of public view. | Same reconnaissance value as S8 (production schema, a policy or RLS that differs from migrations); error text may carry host/user details. No secret values: registered secrets are masked (an URL-encoded password in an error would not be). | Don't print the diff: write it to a file, print only line count and a hash; the person runs `db diff` locally to read it. Or upload it as a short-retention artifact only if the repo is private. | devops-cicd (the person decides on visibility) |
+| S19 | `drift.yml:24`, `tasks/0/TASK_BRIEF.md` Blocked (2) | `environment: production` on a job auto-creates the environment **without** branch restrictions if it doesn't exist yet; and if the secrets are put at repo level instead of in the environment, any same-repo PR workflow can read them (`ci.yml` runs on `pull_request`). Nothing checks either. | The protection described in the comment at `:22-23` depends on settings no script verifies. | bootstrap-check (read-only `gh api`): environment `production` exists, deployment branch policy = `main` only, and no repo-level secrets named `SUPABASE_*`. | devops-cicd |
+| S20 | `roles/git-release.md:19` | "Owns ... GitHub repository settings: branch protection, labels, merge settings" contradicts AGENT_RULES 18a and the same file's line 32 ("the person sets it"). | An agent reading only the "Owns" list may change protection. | Reword `:19` to "labels (creating only); branch protection and merge settings are the person's (AGENT_RULES 18a)". | the person (roles/** owner) |
+| S21 | `ORCHESTRATOR.md:69` | "A PR therefore can't edit the gate that judges it" is stronger than the behavior (F1, S14, S5). | Docs overstate the control. | After F1 and S14: "can't edit the gate script or workflow"; list S14 as accepted risk if it stays. | the person |
+
+Temporary state (asked explicitly): while this PR is open, the required check is still the old
+`gate` job (`ci.yml:107-120`), which runs the PR's own `gate-check.sh` from the PR head. For this
+PR that check proves nothing: the PR controls the script. That is acceptable only because the
+real control for PR #2 is the person reading the diff and adding `framework-change-approved`
+(Blocked item 4), and `gate.yml` can't run before it is on `main`. Conditions: (1) right after the
+merge the person swaps the required check `gate` → `merge-gate` and turns bypassing off, and (2) the
+follow-up PR removing the `gate` job is merged under the new `merge-gate`. Until (1) is done, S1
+from the PR #1 gate stays open for every PR. bootstrap-check should verify the required contexts
+(S3, still open).
+
+Checked and fine: AGENT_RULES 18a matches the gate (the label check trusts only the label, which
+only the person adds) and the role docs; `ci.yml` temporary job uses `head.sha` only in `with:` and
+the label boolean only in `env:`; drift secrets are now step-scoped to `link` and `db diff`
+(`drift.yml:56-69`), the presence check passes only booleans (`:35-38`), checkout has
+`persist-credentials: false`, and `npm ci` gets no secrets; `issues: write` is the only write
+permission and it doesn't reach PR code (drift runs on schedule/dispatch only).
 
 ## Secret exposure
 
