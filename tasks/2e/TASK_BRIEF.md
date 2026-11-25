@@ -54,6 +54,9 @@ specs/2a/post-deploy.md
 
 - **Changed:** `specs/2a/post-deploy.md` (check result table, AC8 PASS, Result DONE; first drift run's diff line), `tasks/board.md` (2a DONE, 2d DONE, row 2e), this brief.
 - **Verified:** the rows match the expected values in `specs/2a/schema.md` section 7 and `specs/2a/threat-model.md`; Supabase Preview on `af59b2d` (2b) is still `in_progress` at 16:32 UTC (left for 2b's close-out).
+- **verify.sh:** `bash scripts/verify.sh` (brief from branch name): `verify.sh: PASS 17/17 (1 skipped)` (skipped: test:e2e, no script); the later wording-only commit touches docs only.
+- **2d DONE:** the orchestrator's decision: PR #12 is merged and is docs only, so there is nothing to deploy and no post-deploy record of its own.
+- **First gate round:** security PASS, review APPROVE; their nits (table pipes, "below" vs "above") were fixed in commit 8076308, so both gates were run again in fresh contexts.
 
 ## Blocked (fill in only when BLOCKED)
 
