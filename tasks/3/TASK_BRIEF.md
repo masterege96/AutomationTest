@@ -162,6 +162,8 @@ supabase/templates/**
 .github/workflows/**
 # db-architect, security, qa-test, code-reviewer specs
 specs/3/**
+# git-release (PROJECT_CONTEXT Commands + API style, with the person's OK 2026-11-25)
+PROJECT_CONTEXT.md
 ```
 
 | Role | Paths it may change in this task | Notes |
@@ -205,7 +207,7 @@ specs/3/**
 
 ## Questions for the person
 
-**Answered 2026-11-25 (the person, via the coordinator; recorded in `tasks/decisions.md`): all recommended defaults below, and S14 stays accepted for this merge.** Q2 is still open: backend-dev proposes, the person picks.
+**Answered 2026-11-25 (the person, via the coordinator; recorded in `tasks/decisions.md`): all recommended defaults below, and S14 stays accepted for this merge.** Q2 answered 2026-11-25 16:43 UTC: route handlers (Option A in the backend-dev Handoff entry) and the type-generation command.
 
 Each has a recommended default. The task stays in `BACKLOG` until they're answered (the orchestrator records the answers in `tasks/decisions.md` and here).
 
@@ -240,6 +242,37 @@ Each has a recommended default. The task stays in `BACKLOG` until they're answer
   - Choices product-spec made that the person or security may overturn (flagged, not asked): titles are trimmed and counted in Unicode code points; list is newest first; extra fields are rejected with 400 (not silently dropped); marking done is idempotent ("set", not "flip"); not-found and not-yours give the same 404; delete is permanent; a 10 KB body limit; the exact screen texts in quotes. If any of these is wrong, product-spec updates the AC before building.
   - Never write the words "Allowed paths" above the Scope section of this brief: verify.sh starts reading at their first occurrence and takes the next fenced block.
   - CSP: keep exactly one `Content-Security-Policy` header per response; when the nonce policy moves into the proxy, the CSP entry in `next.config.*` goes away (devops-cicd) and the header test changes (qa-test), in the same PR.
+
+### backend-dev, 2026-11-25 (Design: API proposal)
+
+Question 2 is for the person to decide. Nothing was built. Sources: `node_modules/next/dist/docs/01-app/` (Next 16.4.6): `01-getting-started/15-route-handlers.md`, `02-guides/data-security.md` (Server Actions), `03-api-reference/05-config/01-next-config-js/serverActions.md`, `03-api-reference/03-file-conventions/proxy.md`.
+- **Proxy file name:** `proxy.ts`. `middleware` was deprecated and renamed to `proxy` in v16.0.0, and proxy runs on the Node.js runtime by default (proxy.md, "Migration to Proxy"). `middleware.ts` will not be created. The proxy only refreshes the session cookie and sets the nonce CSP. It never decides access: every endpoint checks the session itself (AC21). The proxy buffers request bodies up to 10 MB (`proxyClientMaxBodySize`), so the 10 KB limit has to be enforced in the handler.
+- **Order in every endpoint (both options):** for POST/PATCH/DELETE, Origin check first, then authenticate (`supabase.auth.getUser()`, which asks the Auth server), then 415 (content type), then 413 (size), then 400 (JSON, id, zod), then run the query with the user's own client (RLS applies), then send the response. No service role is used.
+
+**Option A: route handlers** (`app/api/todos/route.ts`, `app/api/todos/[id]/route.ts`, shared helpers in `lib/server/`)
+| Method, path | Request body | Success | Errors |
+|---|---|---|---|
+| `GET /api/todos` | none | 200 `{"todos":[{"id","title","done","created_at"}]}`, newest first | 401 |
+| `POST /api/todos` | `{"title":string}` | 201 `{"todo":{…}}` | 400, 401, 403, 413, 415 |
+| `GET /api/todos/[id]` (for AC22 "read") | none | 200 `{"todo":{…}}` | 400 bad id, 401, 404 |
+| `PATCH /api/todos/[id]` | `{"title"?:string,"done"?:boolean}`, at least one | 200 `{"todo":{…}}`; setting done twice is idempotent (AC43) | 400, 401, 403, 404, 413, 415 |
+| `DELETE /api/todos/[id]` | none | 204, empty body | 400 bad id, 401, 403, 404 (also on a second delete, AC44) |
+- **Validation (zod):** `z.strictObject` on create and patch, so any unknown field (`user_id`, `id`, `done` on create, `created_at`) gives 400 (AC28/AC29). Title: `z.string().trim()`, then a refine that counts code points (`[...s].length`) between 1 and 200. zod's `.min`/`.max` count UTF-16 units, which would wrongly reject 200 emoji (AC16). `done` is `z.boolean()`, so `"true"`, `1` and `null` give 400. The `[id]` param uses zod's uuid check (`z.uuid()`), assuming `specs/3/schema.md` uses uuid ids. Not-yours and not-found are the same case: the query runs with `.eq('id', id)` under RLS, and 0 rows means 404 with the same body (AC22).
+- **Body:** the content type must be `application/json`, otherwise 415. A `Content-Length` over 10240 gives 413 before reading. Otherwise the handler reads `request.text()`, returns 413 if the UTF-8 byte length is over 10240 (this catches chunked bodies with no length), then runs `JSON.parse`; a parse failure gives 400 `invalid_json`.
+- **CSRF:** route handlers have no built-in Origin check (the docs describe one only for Server Actions). `lib/server/origin.ts` gives 403 `forbidden_origin` unless `Origin` exactly equals the app's own origin; a missing Origin is also refused. Requiring JSON also forces a CORS preflight on cross-site requests, and the app sends no CORS headers. Cookies stay `SameSite=Lax`, the @supabase/ssr default. Proof: a request with `Origin: https://evil.example` plus A's cookies gives 403 and changes nothing.
+- **Tests:** abuse tests are plain `fetch` calls with A's or B's cookies and assert the exact status and body. That works for every AC17/18/20-22/26/28/29/43-45 case.
+
+**Option B: Server Actions** (`'use server'` file `lib/server/actions/todos.ts`: `createTodo(title)`, `updateTodo(id, patch)`, `deleteTodo(id)`; the list is read in a Server Component)
+- **Reachability:** a POST to the page URL with a `Next-Action: <id>` header and React-encoded arguments. The ids are encrypted and change with each build, but the docs say to treat actions as "reachable via direct POST requests". All actions live at top level in one file, with no closures, so no encrypted closure data is sent to the browser. `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` is only needed when self-hosting on several instances.
+- **Security:** each action takes `unknown` arguments and runs the same zod schemas, `getUser()` and RLS ownership check inside itself. Next compares Origin with Host itself and aborts on a mismatch (built-in CSRF protection; `serverActions.allowedOrigins` stays unset). The body limit defaults to 1 MB, and devops-cicd would set `serverActions.bodySizeLimit: '10kb'` in `next.config.ts`.
+- **Gaps against the ACs:** actions return values, not status codes, so each would return `{ok:true,todo}` or the error object below with HTTP 200. The 401/404/400 ACs would have to be reworded as error codes. 415 does not apply. An oversized body and a foreign Origin are refused by the framework with whatever status and body Next chooses, not our format. Abuse tests would need the action id from each build's manifest plus React's argument encoding, which is brittle. Calling the functions directly in Vitest skips the HTTP boundary, so it does not prove AC21 or AC26. `/api/todos` would still be needed if any client other than the UI calls it.
+
+**Error format (both options):** `{"error":{"code":"…","message":"…"}}`. Messages are fixed English text. They never repeat the input and never contain a stack trace, SQL, or ids. Codes: `unauthorized` 401, `forbidden_origin` 403, `not_found` 404, `invalid_json` 400, `invalid_id` 400, `validation_failed` 400, `payload_too_large` 413, `unsupported_media_type` 415, `method_not_allowed` 405, `internal_error` 500 (the details are logged on the server without the request body). For AC20, `app/api/[...rest]/route.ts` returns JSON 404 `not_found` for any unknown `/api/*` path, such as `/api/admin`; `/admin` gets Next's normal 404 page.
+
+**Auth:** recommended: the browser calls Supabase directly. `createBrowserClient` (from @supabase/ssr, anon key) calls `signInWithOtp({ email })`, then `verifyOtp({ email, token, type: 'email' })`, and later `signOut()`. Supabase's per-IP limits then see each user's own IP (row 9, AC32: the app adds no verify endpoint of its own). If sign-in went through our server routes, every user would share the server's IP: the per-IP limit would apply to everyone at once, and one attacker could block sign-in for all users. **How the session reaches the server:** the @supabase/ssr browser client stores the session in `sb-…-auth-token` cookies. Those cookies can't be `HttpOnly`, because browser JavaScript writes them; security should note this. `lib/server/supabase.ts` builds `createServerClient(NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, { cookies: { getAll, setAll } })` on `await cookies()` from `next/headers`, and `proxy.ts` refreshes expired tokens. Authorization uses only `getUser().id`, never `user_metadata` (AC27). For AC8, security decides `signOut` scope and whether `getUser()` (rejects revoked sessions) or `getClaims()` (local JWT check) is used.
+**Type generation (proposed, needs approval for PROJECT_CONTEXT Commands):** `npx supabase gen types typescript --local > types/database.ts`.
+
+**Recommendation: Option A (route handlers).** Every API AC is written as an HTTP status, and with route handlers each one maps directly to a status and our error format. qa-test can call them with plain `fetch` in the abuse suite, and the one CSRF control we add is a small function with its own test. Option B would mean rewording those ACs and calling per-build action ids in abuse tests.
 
 ## Blocked (fill in only when BLOCKED)
 

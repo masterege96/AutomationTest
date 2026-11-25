@@ -41,6 +41,7 @@ Every version in `package.json` is exact (`.npmrc` has `save-exact=true` and `en
 | Start local DB | `npx supabase start` |
 | Reset local DB from migrations | `npx supabase db reset` |
 | DB tests | `npx supabase test db` |
+| Generate DB types | `npx supabase gen types typescript --local > types/database.ts` |
 | SQL lint | `npx supabase db lint` |
 | New migration | `npx supabase migration new <what>` |
 | Done gate | `bash scripts/verify.sh --brief tasks/<id>/TASK_BRIEF.md` |
@@ -52,9 +53,9 @@ Use `npx supabase` so the pinned CLI from `node_modules` runs, not a global inst
 
 - **Folder layout:** Next.js App Router at the repo root (no `src/`): `app/` pages and layouts, `app/api/**` route handlers, `components/`, `lib/client/`, `lib/server/`, `supabase/migrations/`, `supabase/tests/`, `tests/{integration,e2e,abuse}/`. Import alias `@/*` maps to the repo root.
 - **Naming (files, components, tables, columns):** Components PascalCase (`TodoList.tsx`), other TS files kebab-case, tables plural snake_case (`todos`), columns snake_case, migrations `<timestamp>_<snake_case>.sql` from `supabase migration new`.
-- **API style (route handlers / server actions / edge functions):** not decided yet. backend-dev proposes in the first feature brief; the person decides (record in `tasks/decisions.md`).
+- **API style (route handlers / server actions / edge functions):** route handlers under `app/api/**` (the person, 2026-11-25, `tasks/decisions.md`).
 - **Validation library:** not decided yet (security baseline row 5 suggests zod; needs approval as a new dependency).
-- **Error format returned by APIs:** not decided yet (set with the API style).
+- **Error format returned by APIs:** `{ "error": { "code": "...", "message": "..." } }` (the person, 2026-11-25).
 - **Where an example of each lives:** migration `supabase/migrations/*_init.sql`, DB test `supabase/tests/00_bootstrap_test.sql`, page `app/page.tsx`. No API route, component or unit test yet: the first feature task sets the example.
 
 ## Role paths
