@@ -498,3 +498,7 @@ the output line prefixes and rule 3 are unchanged.
   the label lines name the push (`tip <sha> at <time>`). Existing tests unchanged.
   `npx vitest run tests/integration/gate-check.test.ts`: 85 passed (85). It took 939 s because another session's
   4d `verify.sh` was using the machine at the same time.
+
+### orchestrator, 2026-11-25 (verify after F1 fix)
+
+- Full `bash scripts/verify.sh` on the F1 fix + regression tests: `verify.sh: PASS 19/19 (0 skipped)`. Gate round 2 next, fresh contexts.
