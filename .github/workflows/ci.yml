@@ -1,6 +1,6 @@
 name: ci
 
-# Required checks on main: verify, db-check, secrets, gate (job names must not change).
+# Required checks on main: verify, db-check, secrets (job names must not change), plus merge-gate from gate.yml.
 # Pull requests only: verify.sh needs a task branch (<type>/<id>-<name>) for its scope check.
 on:
   pull_request:
@@ -99,6 +99,8 @@ jobs:
       - name: gitleaks (full history)
         run: gitleaks detect --source . --redact --no-banner --verbose
 
+  # TEMPORARY (removed right after this PR merges): gate.yml (merge-gate, pull_request_target from main)
+  # replaces this job, but it only runs once it is on main. This job runs the PR's own copy.
   # Merge approval for a single-account repo (replaces GitHub's approving review):
   # specs/<id>/security-gate.md says "Result: PASS" and specs/<id>/review.md says "Result: APPROVE",
   # both committed after the last code change. See ORCHESTRATOR.md "Merge approval".
@@ -110,6 +112,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # gate-check.sh needs the merge-base with origin/main
+          ref: ${{ github.event.pull_request.head.sha }} # the PR head, not the merge ref (R1)
 
       - name: gate-check.sh
+        env:
+          FRAMEWORK_CHANGE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'framework-change-approved') && '1' || '0' }}
         run: bash scripts/gate-check.sh

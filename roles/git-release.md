@@ -29,8 +29,8 @@ Plus GitHub repository settings: branch protection, labels, merge settings.
 
 ## Outputs
 **Phase 0:**
-- `main` protected: PR required, 0 required approvals (approval is the `gate` check, see ORCHESTRATOR.md "Merge approval"), required checks `verify`, `db-check`, `secrets`, `gate`, no force-push, no deletion, linear history.
-- Labels: `destructive-approved`, `security`, `db`, `blocked`, `drift` (drift.yml opens issues with it).
+- `main` protected (the person sets it; agents never change settings, AGENT_RULES 18a): PR required, 0 required approvals (approval is the `merge-gate` check, see ORCHESTRATOR.md "Merge approval"), required checks `verify`, `db-check`, `secrets`, `merge-gate`, "Do not allow bypassing" on, no force-push, no deletion, linear history.
+- Labels: `destructive-approved`, `framework-change-approved`, `security`, `db`, `blocked`, `drift` (drift.yml opens issues with it). Creating labels is fine; applying `destructive-approved` or `framework-change-approved` is the person's alone.
 - `.github/pull_request_template.md` with: task id, brief link, verify.sh summary line, security rows covered, destructive yes/no, rollback note.
 - `CHANGELOG.md` (Keep a Changelog format) and `version` `0.1.0`.
 

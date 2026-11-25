@@ -19,22 +19,29 @@ concurrency:
 jobs:
   drift:
     name: drift
+    # Secrets live in the GitHub Environment `production`, restricted to main, so PR-branch
+    # workflows can never read them. The person creates the environment and its secrets.
+    environment: production
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       DRIFT_SCHEMAS: public
+    # Secrets are given only to the steps that need them (not to npm ci or other steps).
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Require the production connection secrets
+        env:
+          HAS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+          HAS_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD != '' }}
+          HAS_PROJECT: ${{ secrets.SUPABASE_PROJECT_ID != '' }}
         run: |
           missing=""
-          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_PROJECT_ID; do
-            [ -n "${!v}" ] || missing="$missing $v"
-          done
+          [ "$HAS_TOKEN" = true ] || missing="$missing SUPABASE_ACCESS_TOKEN"
+          [ "$HAS_PASSWORD" = true ] || missing="$missing SUPABASE_DB_PASSWORD"
+          [ "$HAS_PROJECT" = true ] || missing="$missing SUPABASE_PROJECT_ID"
           if [ -n "$missing" ]; then
             echo "::error::Drift check not configured. Missing GitHub Secrets:$missing"
             exit 1
@@ -49,10 +56,17 @@ jobs:
         run: npm ci
 
       - name: Link the production project (read-only use)
-        run: npx --no-install supabase link --project-ref "$SUPABASE_PROJECT_ID" # reads SUPABASE_DB_PASSWORD from env
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: npx --no-install supabase link --project-ref "$SUPABASE_PROJECT_ID" # expects SUPABASE_DB_PASSWORD from env (confirm on the first run)
 
       - name: supabase db diff against production
         id: diff
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -o pipefail
           npx --no-install supabase db diff --remote --schema "$DRIFT_SCHEMAS" 2>diff.err | tee diff.sql || {
@@ -71,10 +85,9 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
-            const fs = require('fs');
-            const diff = fs.readFileSync('diff.sql', 'utf8').slice(0, 60000);
+            // The repo is public: link to the run, never paste the schema diff into the issue.
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `Drift check failed (${run}). Production differs from \`supabase/migrations\`.\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.\n\n\`\`\`sql\n${diff}\n\`\`\``;
+            const body = `Drift check failed: ${run}\n\nProduction differs from \`supabase/migrations\`. The diff is in the run log.\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.`;
             const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'drift' });
             if (open.length) {
               await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });

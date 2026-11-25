@@ -34,7 +34,7 @@ No task leaves `BACKLOG` until `scripts/bootstrap-check.sh` exits 0.
 While it fails, only git-release and devops-cicd may work, and only on Phase 0.
 Phase 0 is done when:
 
-- the git repo exists with a remote, and `main` is protected (PR required; required checks `verify`, `db-check`, `secrets`, `gate`; see "Merge approval")
+- the git repo exists with a remote, and `main` is protected (PR required; required checks `verify`, `db-check`, `secrets`, `merge-gate`; see "Merge approval")
 - CI runs `scripts/verify.sh` on every PR, and the `db-check` job builds the DB from scratch
 - the deploy path is connected (Supabase integration or CI deploy job) **before the first real table**
 - the nightly drift check workflow exists
@@ -62,15 +62,25 @@ BACKLOG → SPEC_READY → IN_PROGRESS → IN_REVIEW → VERIFYING → DONE
 
 ## 3a. Merge approval
 
-GitHub's required review count on `main` is **0**. Approval is the required `gate`
-CI check (`scripts/gate-check.sh`), which passes only when, for the task named by the
-branch (`<type>/<id>-<name>`):
+GitHub's required review count on `main` is **0**. Approval is the required
+**`merge-gate`** check from `.github/workflows/gate.yml`. It runs on
+`pull_request_target`, so the workflow and `scripts/gate-check.sh` come from `main`;
+the PR's commit is only fetched and read with git, never checked out or executed.
+A PR therefore can't edit the gate that judges it. It passes only when, for the task
+named by the branch (`<type>/<id>-<name>`):
 
-- `specs/<id>/security-gate.md` has a line `Result: PASS`
-- `specs/<id>/review.md` has a line `Result: APPROVE`
+- the **first** non-empty line of `specs/<id>/security-gate.md` is `Result: PASS`
+- the **first** non-empty line of `specs/<id>/review.md` is `Result: APPROVE`
 - both files were committed in a later commit than the last code change on the branch,
   so a review can't approve code that changed afterwards. Any new code commit means both
-  gates run again, each in its own commit.
+  gates run again, each in its own commit. No merge-base with `main` is a FAIL.
+- if the PR changes `.github/workflows/**`, `scripts/**`, `rules/**`, `roles/**` or
+  `ORCHESTRATOR.md`, the PR carries the `framework-change-approved` label. Only the
+  person adds it (AGENT_RULES 18a).
+
+Branch protection on `main`: PR required, 0 approvals, required checks `verify`,
+`db-check`, `secrets`, `merge-gate`, and **"Do not allow bypassing the above settings"
+on** (admins included).
 
 **security** and **code-reviewer** each run in a fresh agent context, never the
 builder's, and never each other's. They read the repo and the brief, not the builder's

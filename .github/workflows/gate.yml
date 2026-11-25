@@ -1,0 +1,29 @@
+# Trusted merge gate. Runs from the BASE branch (pull_request_target), so a PR
+# can't edit the gate that judges it. The PR's commit is fetched and READ with
+# git only: never checked out, installed or executed. Don't add steps that run
+# PR code here (that would hand PR code the base repo's token).
+name: gate
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+jobs:
+  merge-gate:
+    runs-on: ubuntu-24.04 # pinned runner image, like ci.yml (no "latest")
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, base branch, not the PR
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch PR head (read only)
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: git fetch --no-tags origin "+refs/pull/${PR}/head:refs/pr/head"
+      - name: Gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          FRAMEWORK_CHANGE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'framework-change-approved') && '1' || '0' }}
+        run: bash scripts/gate-check.sh --base "origin/${BASE_REF}" --head refs/pr/head --branch "$BRANCH"
