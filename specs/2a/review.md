@@ -1,81 +1,91 @@
 Result: APPROVE
 
-# Task 2a code review: revoke EXECUTE on future functions created by `postgres`
+# Task 2a code review: revoke EXECUTE on future functions created by `postgres` (after main merge)
 
-Reviewer: code-reviewer, 2026-11-25, fresh context (no builder context). Branch `db/2a-function-privileges`,
-diff `git diff origin/main...HEAD` after `git fetch origin` (merge-base `5fcb5ba`; `origin/main` is at `de0cfb9`).
-Read: `rules/AGENT_RULES.md`, `roles/code-reviewer.md`, `roles/db-architect.md`, `roles/db-builder.md`,
-`rules/database-and-deploy.md`, `tasks/2a/TASK_BRIEF.md`, `specs/2a/schema.md`, `specs/2a/threat-model.md`,
-`specs/2a/security-gate.md`, `supabase/tests/01_default_privileges_test.sql`. Local stack only, no cloud access.
+Reviewer: code-reviewer, 2026-11-25, fresh context (no builder context). Re-run because the orchestrator merged
+`origin/main` into the branch after my first review (`97f37e2`, APPROVE). Branch `db/2a-function-privileges`
+at `9587ac8` (merge `7b136ab` + security re-gate `9587ac8`, PASS); `origin/main` at `69c6151` after
+`git fetch origin`, which is now the merge-base (branch is up to date with main; `git merge-tree` reports no
+conflicts). Local stack only, no cloud access.
+
+## What changed since my first review
+
+- `git diff 97f37e2 HEAD -- supabase/` is **empty**: the migration
+  `supabase/migrations/20261125150215_function_privileges.sql` and `supabase/tests/02_function_privileges_test.sql`
+  are unchanged, so the first review's code analysis (below, carried forward) still holds.
+- Merge `7b136ab` brought in main's PR #8 (tasks docs: tasks 0/1 DONE, task 2c brief, lessons L17-L19, incident
+  update, specs/2c) and PR #9 (`scripts/verify.sh` reorder: database section before project checks). None of that
+  is in this PR's net diff, since it is already on main.
+- Branch-side edits in the merge: `tasks/board.md` 2a row (state `IN_REVIEW`, title now "all schemas"),
+  `tasks/lessons.md` this task's lesson renumbered L17 -> **L20**, `tasks/2a/TASK_BRIEF.md` reference updated to
+  "See lessons L20" (`:108`) plus an orchestrator note (`:124-127`).
+
+## Merge resolution checks
+
+| Check | Result |
+|-------|--------|
+| Net diff `git diff --name-only origin/main...HEAD` | only `specs/2a/**` (4 files), `supabase/migrations/20261125150215_function_privileges.sql`, `supabase/tests/02_function_privileges_test.sql`, `tasks/2a/TASK_BRIEF.md`, `tasks/board.md`, `tasks/decisions.md`, `tasks/lessons.md`: all allowed paths |
+| Conflict markers (`^<<<<<<<`, `^=======`, `^>>>>>>>`) in `tasks/ specs/ supabase/ scripts/` | none |
+| `tasks/board.md` vs main | main's rows 0 (DONE), 1 (DONE), 2c (IN_REVIEW) kept verbatim; only the 2a row is added |
+| `tasks/lessons.md` vs main | L1-L19 identical to main; only L20 appended; headings L1..L20 each appear once |
+| `tasks/decisions.md` vs main | only this task's 2026-11-25 decision row appended |
+| Brief reference | `tasks/2a/TASK_BRIEF.md:108` says "See lessons L20"; no stale "L17" reference left for this lesson |
 
 ## Checks run (under the shared `.verify-lock`, released afterwards)
 
 | Check | Result |
 |-------|--------|
-| `npx --no-install supabase db reset` | exit 0, all 3 migrations apply |
-| `npx --no-install supabase test db` | `Files=3, Tests=45`, `Result: PASS` (02: 30/30) |
-| `npx --no-install supabase db lint --level error --fail-on error` | "No schema errors found", exit 0 |
-| `bash scripts/verify.sh --brief tasks/2a/TASK_BRIEF.md` | `verify.sh: PASS 18/18 (1 skipped)` (skip: `test:e2e`, no script); scope, migration names, no edited migration, no CR, destructive scan all PASS |
+| `bash scripts/verify.sh --brief tasks/2a/TASK_BRIEF.md` (base `origin/main`) | `verify.sh: PASS 18/18 (1 skipped)` (skip: `test:e2e`, no script); scope, migration names, no edited migration, no CR, destructive scan, all migrations apply, `supabase test db`, SQL lint all PASS; the database section now runs before the project checks (PR #9) |
 
-## Against the acceptance criteria and role contracts
+## Against the acceptance criteria and role contracts (carried forward; code unchanged)
 
 - **AC1** -> T1, `02_function_privileges_test.sql:19-30` (row exists, no EXECUTE for PUBLIC/anon/authenticated,
   ACL exactly `{postgres=X/postgres}`).
 - **AC2** -> T2 `:33-51` (16 `has_function_privilege` checks over 4 probes incl. the other schema and the procedure)
   and T3 `:55-63` (four `throws_ok` with SQLSTATE 42501 and exact message, then `current_user = 'postgres'`).
 - **AC3** -> T4 `:97-102`.
-- **AC4** -> `01_default_privileges_test.sql` not in the diff, 12/12 pass; task 1's "documented gap" is now asserted by T2.
-- **AC5** -> migration `supabase/migrations/20261125150215_function_privileges.sql:7-9`: exactly the three statements
-  of schema.md section 1, no `IN SCHEMA`, comments only otherwise; one logical change; no existing migration
-  edited; creates no objects or data; file name has the `migration new` format (timestamp + snake_case). Idempotence
-  asserted at `:77-94` (re-runs the three statements, compares row count and every `postgres` row's ACL text both ways).
-- **AC6** -> schema.md sections 2-3 (creator role, every schema, `storage` exception, no existing function changes);
-  security signed off in threat-model.md "Sign-off on schema.md".
-- **AC7** -> verify.sh PASS (above); security gate PASS; CI pending (see finding 1).
+- **AC4** -> `01_default_privileges_test.sql` not in the diff, passes; task 1's "documented gap" is now asserted by T2.
+- **AC5** -> migration `:7-9`: exactly the three statements of schema.md section 1, no `IN SCHEMA`, comments only
+  otherwise; one logical change; no existing migration edited; creates no objects or data; `migration new` file
+  name format. Idempotence asserted at `:77-94`.
+- **AC6** -> schema.md sections 2-3; security signed off in threat-model.md "Sign-off on schema.md".
+- **AC7** -> verify.sh PASS (above); security gate PASS (re-gated `9587ac8`); the branch no longer conflicts with
+  main, so the `pull_request` CI run can happen (L19); CI result itself is for git-release to confirm.
 - **AC8** -> post-merge, read-only; the queries are in schema.md section 7.
 - **Production safety:** default privileges only apply to objects created later; nothing existing changes; no
   destructive statement; rollback documented (schema.md section 6). Safe on a populated DB.
-- **Test vs schema.md section 8:** T1 (incl. exact ACL), T2 (4 probes incl. `t2_other` and the procedure, all four
-  roles), T3, T4, T6 (grantees incl. `service_role`, exception exactly `storage`), idempotence all present; T5 is the
-  unchanged 01 file; negative control was run once and recorded (builder) and reproduced (security), not committed,
-  as schema.md asks. `plan(30)` matches the count (T1 3 + T2 16 + T3 5 + T6 1 + idempotence 2 + T4 3 = 30).
-  All probes and `t2_other` are created inside `begin ... rollback`; the temp table is `on commit drop`; style
-  matches the 01 test.
-- **`; reset role` pattern:** sound. On the expected path the call raises 42501, the pgTAP subtransaction rolls
-  back and undoes `set local role`; `reset role` never runs. If a call wrongly succeeds, `throws_ok` still fails
-  ("no exception") and `reset role` only returns the session to `postgres` so later assertions still run; it can't
-  produce a matching 42501 with the expected message. In T4 (`lives_ok`) it is needed on the normal path, since the
-  successful subtransaction would otherwise keep `authenticated`. The `current_user = 'postgres'` checks (`:63`,
-  `:102`) catch any leak. Deviation from schema.md's literal string is recorded in the brief handoff and L17.
-- **Scope:** changed files are `supabase/migrations/**`, `supabase/tests/**`, `specs/2a/**`, `tasks/**` only.
-  No function in a Supabase-managed schema and no `IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS` (convention rule 5).
+- **Test vs schema.md section 8:** T1, T2, T3, T4, T6, idempotence present; T5 is the unchanged 01 file;
+  `plan(30)` matches (3 + 16 + 5 + 1 + 2 + 3). Probes created inside `begin ... rollback`; temp table
+  `on commit drop`.
+- **`; reset role` pattern:** sound (analysis in the first review unchanged): on the expected path the 42501 rolls
+  back the subtransaction and `reset role` never runs; if a call wrongly succeeds, `throws_ok` still fails and the
+  session returns to `postgres`; `current_user = 'postgres'` checks (`:63`, `:102`) catch any leak. Recorded in L20.
+- **Scope:** no function in a Supabase-managed schema and no `IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS`.
 
 ## Findings
 
-1. **should-fix**: `tasks/board.md:7` and `tasks/lessons.md:225`: the branch **conflicts with `origin/main`**
-   (`git merge-tree` reports content conflicts in both files). `origin/main` (`de0cfb9`, PR #8) set tasks 0 and 1
-   to DONE and added its own **L17** ("A post-deploy record under specs/<id>/ makes the task's gates stale").
-   A PR with conflicts gets no `pull_request` CI run (L19 on `ci/2c-verify-db-first`), so AC7's "CI green" can't
-   be met until this is resolved. Fix: merge `origin/main` into the branch, keep main's rows 0/1 = DONE and main's
-   L17, and renumber this task's lesson. Docs-only: a merge commit touching only `tasks/**` does not make the gate
-   files stale under `gate-check.sh` (it excludes `tasks/**` from the code-change check). Owner: git-release
-   (merge), orchestrator (lessons/board).
-2. **should-fix**: `tasks/lessons.md:225` lesson-number collision across branches: this branch's L17 (`throws_ok`
-   role leak), `main`'s L17 (post-deploy gate staleness), `sec/2b-headers-auth-defaults`'s L17 (local auth rate
-   limits), and `ci/2c-verify-db-first` already uses L18 and L19. Renumber at merge time in merge order (2a's
-   becomes L18 or later depending on whether 2c lands first), and update the reference in
-   `tasks/2a/TASK_BRIEF.md:108` ("See lessons L17"). Owner: orchestrator (or git-release when merging).
-3. **nit**: `tasks/board.md:7` says 2a is `BACKLOG`, while `tasks/2a/TASK_BRIEF.md:5` says `IN_REVIEW`. The
-   board should match the brief state. Owner: orchestrator.
-4. **nit**: `tasks/2a/TASK_BRIEF.md:1` and `tasks/board.md:7` still describe the scope as "in `public`"; after the
-   person's Q1 answer the change is global (every schema, role `postgres`). The Goal line is likewise
-   `public`-only. Answers section is correct; title and board text are stale. Owner: product-spec / orchestrator.
-5. **nit**: `tasks/2a/TASK_BRIEF.md:113` records `verify.sh: PASS 17/17 (1 skipped)`; current runs (security's
-   and mine) show `18/18`. Not a problem in itself (likely a different base/check set at the time), but the
-   pasted summary line (AGENT_RULES rule 20) is out of date. Owner: db-builder (or leave as historical).
-6. **nit**: `specs/2a/schema.md:245` and `:248` still show the T3/T4 SQL strings without the trailing
-   `; reset role`; schema.md section 5 rule 2 is the convention later function migrations will copy. L17's
-   suggested framework fix covers it; worth applying in schema.md / the threat-model template in a follow-up so
-   the next function migration copies the safe form. Owner: db-architect, security.
+Resolved since the first review:
 
-No blockers. The migration and test are correct, match the signed-off spec, and pass locally.
+1. ~~should-fix: branch conflicts with `origin/main` (`tasks/board.md`, `tasks/lessons.md`)~~ **Resolved** by merge
+   `7b136ab`: no conflict markers, main's content kept, `git merge-tree` against current `origin/main` is clean.
+2. ~~should-fix: lesson-number collision (this branch's L17)~~ **Resolved**: renumbered to L20, after main's L17-L19;
+   L1-L20 unique; brief reference updated (`tasks/2a/TASK_BRIEF.md:108`).
+3. ~~nit: board said 2a `BACKLOG` while the brief said `IN_REVIEW`~~ **Resolved**: `tasks/board.md:8` now `IN_REVIEW`.
+
+Remaining (all nits, none blocking):
+
+4. **nit** (partly resolved): the board row now says "all schemas", but `tasks/2a/TASK_BRIEF.md:1` (title) and the
+   Goal line still say "in `public`"; after the person's Q1 answer the change is global (every schema, role
+   `postgres`). Owner: product-spec / orchestrator.
+5. **nit**: `tasks/2a/TASK_BRIEF.md:113` records `verify.sh: PASS 17/17 (1 skipped)`; current runs show `18/18`.
+   Historical line, fine to leave. Owner: db-builder (optional).
+6. **nit**: `specs/2a/schema.md:245` and `:248` still show the T3/T4 SQL strings without the trailing
+   `; reset role`. The orchestrator note (`tasks/2a/TASK_BRIEF.md:127`) defers this to the next function
+   migration's db-architect to keep the gates fresh, with L20 recording the safe pattern. Acceptable; keep L20
+   open until the convention text is updated. Owner: db-architect, security.
+7. **nit** (new): the orchestrator note (`tasks/2a/TASK_BRIEF.md:126`) says the merge touched "tasks/ files only";
+   the merge commit also brought main's `scripts/verify.sh` and `specs/2c/**`. Harmless (they are identical to
+   main and not in the PR's net diff), but the note is imprecise. Owner: orchestrator (optional).
+
+No blockers. The migration and test are unchanged from the approved version, the merge resolution is correct,
+and verify.sh passes on the merged branch.
