@@ -280,3 +280,43 @@ Ownership within the task: devops-cicd builds `scripts/verify.sh`, `scripts/boot
 
 - Q1-Q4: build with the stated defaults; the person sees them in the PR before adding the label.
 - PR #16 (4a) is open in parallel and removes `tasks/board.md`; this branch merges main before its gates run.
+
+### devops-cicd, 2026-11-25 (contract for qa-test, before the build)
+
+Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions qa-test can rely on:
+
+- **Bundle FAIL name has no trailing space** (today's line ended with a space after the last name):
+  `  FAIL  server secrets in client bundle: <NAME> [<NAME> ...]`. Order of names: shell-exported vars
+  (`SUPABASE_SERVICE_ROLE_KEY STRIPE_SECRET_KEY OPENAI_API_KEY ANTHROPIC_API_KEY DATABASE_URL`), then status names
+  (`SERVICE_ROLE_KEY SECRET_KEY JWT_SECRET DB_URL S3_PROTOCOL_ACCESS_KEY_SECRET`), then `stripe-secret-pattern`,
+  `sb-secret-key-pattern`, `service-role-jwt-pattern`. Detail lines: `<NAME>: <bundle file path(s)>`, then
+  `Only NEXT_PUBLIC_* values may reach the client.`
+- **Status values shorter than 8 characters are not compared** (avoid trivial matches); generate longer fakes.
+  Shell-exported vars keep today's 16-character minimum.
+- **Patterns skip a hit equal to a local server value** (so a bundle holding the local `SERVICE_ROLE_KEY` prints only
+  `SERVICE_ROLE_KEY`, not also `service-role-jwt-pattern`).
+- **"From this build":** after the build exits 0, at least one regular file under `.next/static`, `dist` or `build` must be
+  newer than a marker taken just before the build (backdated 2 s where `touch -d` supports it). Stale files alone give
+  `  FAIL  client bundle scan (no client bundle from this build)`. A stub build should write its files during the run.
+- **In CI with a leak and no local values**, one line is printed: the leak FAIL, with an extra detail line
+  `local stack values unavailable (required in CI)`. Without a leak: the AC13 line.
+- **Fake `supabase` stub:** verify.sh calls `supabase status -o env` (first `supabase` on `PATH`; else
+  `npx --no-install supabase status -o env`), stdout lines `NAME="value"` (quotes optional); non-zero exit = not running.
+  It's called only once, after a successful build. With `--no-db` the `[database]` section never calls the stub.
+- **Destructive scan:** also exempts `ALTER DEFAULT PRIVILEGES ... GRANT|REVOKE ...` statements (a GRANT/REVOKE in
+  Postgres grammar; task 1's migration uses it). Strings and identifiers in quotes stay scanned; `/* */` nests as in Postgres.
+- **L5 test-file search:** `find` from the repo root, pruning every `node_modules`, `.next` and `.git` directory and
+  `./tests/e2e`. Detail lists up to 5 paths.
+- **bootstrap-check `gh` stub:** calls are
+  `gh auth status`,
+  `gh api --method GET repos/{owner}/{repo}/branches/main/protection` (unchanged; today's call had no `--method`, the
+  new one keeps it as it was),
+  `gh api --method GET repos/{owner}/{repo}/environments/production`,
+  `gh api --method GET repos/{owner}/{repo}/environments/production/deployment-branch-policies?per_page=100`
+  (only when the environment says `"custom_branch_policies": true`),
+  `gh api --method GET --paginate repos/{owner}/{repo}/actions/secrets?per_page=100` (print every page; concatenated
+  JSON objects are fine). Errors: exit non-zero and print `gh: <message> (HTTP <code>)` to stderr, as real `gh` does.
+  JSON may be compact or pretty. A policy must have `"type": "branch"` explicitly.
+- **S19 error lines:** `... (could not read: HTTP <code>)`; if stderr has no HTTP code: `... (could not read: gh api failed)`.
+  A non-404 error on `environments/production` FAILs both the environment and the policy line with that suffix.
+  AC28 lists several names separated by a comma and space: `(found: SUPABASE_A, SUPABASE_B)`.
