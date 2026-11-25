@@ -295,3 +295,19 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   made the gates stale whenever main had non-tasks changes (L22).
 - **Fix (plan step 4):** one file per task (`tasks/<id>/status.md`, `tasks/lessons/<id>-<n>.md`), or
   append-only files with a `merge=union` rule in `.gitattributes`.
+
+## L24. Rate-limit units were assumed, not checked against production (open, devops-cicd)
+
+- **Seen:** 2026-11-25, first run of the key-scoped auth-settings script. The orchestrator took per-hour figures from
+  the Supabase "Rate limits" guide and multiplied the checklist's per-5-minute limits by 12. In production the
+  Management API stores `rate_limit_verify`, `rate_limit_token_refresh`, `rate_limit_web3` (and `rate_limit_otp`)
+  per 5 minutes: the values before the run (150, 30, 30) were exactly the dashboard's "per 5 minutes" defaults. Token
+  verifications were loosened from 5 to 60 per 5 min until the fix run a few minutes later.
+- **Caught by:** the person reading the script's before/after table.
+- **Fix (devops-cicd, step 4):** version the production auth settings as a scripted, key-scoped Management API PATCH
+  with a production values file in the repo (no dashboard clicks, never `supabase config push` of the local
+  config.toml, which would push local URLs). The script takes each key's unit from the pinned CLI's config schema
+  (its descriptions say "in a 5 minute interval"), refuses to run when a key's current value differs from the expected
+  value (known default or last applied), and shows current -> new and waits for the person's "yes".
+- **Open questions for the person (not decided):** may the person's read-only verification SELECTs in the dashboard
+  SQL editor be written into the rules as allowed? Does a docs-only task (like 2d) need its own post-deploy record?
