@@ -42,6 +42,31 @@ jobs:
       - name: Install gitleaks (pinned, checksum verified)
         run: bash scripts/ci/install-gitleaks.sh "$GITLEAKS_VERSION"
 
+      # Playwright version comes from the lockfile (@playwright/test); Chromium only (task 3, Q1).
+      - name: Install Playwright Chromium (version from the lockfile)
+        run: npx --no-install playwright install --with-deps chromium
+
+      # Task 3 (L18): tests that need the local stack (auth, abuse, e2e) read its URL and keys from the
+      # environment. Start the stack here so the values exist before verify.sh; verify.sh sees it running,
+      # skips its own start, then resets, tests and lints the database as before (local keys and ports are
+      # fixed by supabase/config.toml, so a db reset doesn't change them).
+      - name: Start the local Supabase stack
+        run: npx --no-install supabase start
+
+      # Values are read at run time, masked, and written only to $GITHUB_ENV (never stored or printed).
+      - name: Export the local stack env for the tests (masked)
+        run: |
+          status_env=$(npx --no-install supabase status -o env) || { echo "supabase status failed"; exit 1; }
+          read_status() { printf '%s\n' "$status_env" | sed -nE "s/^$1=\"?([^\"]*)\"?[[:space:]]*\$/\1/p" | head -n 1; }
+          for pair in NEXT_PUBLIC_SUPABASE_URL=API_URL NEXT_PUBLIC_SUPABASE_ANON_KEY=ANON_KEY MAILPIT_URL=MAILPIT_URL; do
+            name="${pair%%=*}"; src="${pair#*=}"
+            value="$(read_status "$src")"
+            if [ -z "$value" ]; then echo "supabase status -o env has no $src"; exit 1; fi
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+            echo "exported $name (from $src)"
+          done
+
       - name: verify.sh
         env:
           CI: "true"
