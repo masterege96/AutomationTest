@@ -143,7 +143,9 @@ Every migration that creates a function or procedure, in any schema:
 4. Helper functions used by RLS policies, defaults, views or constraints: grant to the roles that query the table
    (section 4).
 5. Never creates functions in Supabase-managed schemas (`auth`, `storage`, `realtime`, `extensions`, `vault`,
-   `graphql`, `graphql_public`, `supabase_functions`).
+   `graphql`, `graphql_public`, `supabase_functions`), and never adds an
+   `ALTER DEFAULT PRIVILEGES ... IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS`. Code-reviewer and the gate reject a
+   migration that does either (security's sign-off, Q1 decision; T6 guards the second part).
 
 Task 1's convention for tables and sequences (explicit grants plus pgTAP) is unchanged.
 
@@ -204,8 +206,12 @@ select defaclnamespace::regnamespace, defaclacl
 from pg_default_acl
 where defaclrole = 'postgres'::regrole and defaclobjtype = 'f' and defaclnamespace <> 0
 order by 1;
--- expected: public | {postgres=X/postgres}; record any other row (e.g. storage) in the handoff for security
+-- expected: public | {postgres=X/postgres}; record every row in the handoff
 ```
+
+Security's rule for the second query: any production per-schema `postgres` function row other than `public` and
+`storage`, or a `storage` row that differs from local (`{postgres=X, anon=X, authenticated=X, service_role=X}`),
+goes to security before the task is marked done.
 
 Plus: production migration history lists the new migration, and a default drift run is green.
 
@@ -218,15 +224,21 @@ New file, e.g. `supabase/tests/02_function_privileges_test.sql`; same pattern as
 - `public.t2_probe()` returns int, `language sql`, `select 1`
 - `public.t2_probe_definer()` returns int, `language sql`, `security definer`, `set search_path = ''`, `select 1`
 - `create schema t2_other;` and `t2_other.t2_probe()` (same body), to prove the change is global
+- `public.t2_probe_proc()`: `create procedure public.t2_probe_proc() language sql as $$ select 1 $$`, to prove
+  `ON FUNCTIONS` covers procedures
 
 Assertions (names may change; none may be dropped):
 
 - **T1 (AC1):** `pg_default_acl` has a row with `defaclrole = 'postgres'::regrole`, `defaclnamespace = 0`,
   `defaclobjtype = 'f'`; `aclexplode(defaclacl)` has no entry with EXECUTE for grantee `0` (`PUBLIC`), `anon` or
-  `authenticated`. Also assert the `postgres` entry has EXECUTE (owner keeps it).
+  `authenticated`. **And** the row's ACL is exactly `{postgres=X/postgres}` (`defaclacl::text =
+  '{postgres=X/postgres}'`, or the `aclexplode` equivalent: exactly one entry, grantee `postgres`, privilege
+  EXECUTE, grantor `postgres`). This fails if the owner loses EXECUTE or any other role gets a global grant; same
+  expected value as the AC8 production check.
 - **T2 (AC2):** `has_function_privilege(<role>, <fn>, 'EXECUTE')` is `false` for `anon`, `authenticated` and
-  `service_role` on all three probes, and `true` for `postgres`. (This replaces task 1's test item 6, which only
-  documented the gap.)
+  `service_role` on `public.t2_probe()`, `public.t2_probe_definer()`, `t2_other.t2_probe()` and the procedure
+  `public.t2_probe_proc()`, and `true` for `postgres` on all four. (This replaces task 1's test item 6, which only
+  documented the gap. No `call` as `anon` is needed for the procedure; T3 covers the behavioral case.)
 - **T3 (AC2, behavioral):** as `anon`, then as `authenticated`, calling `public.t2_probe()` and
   `public.t2_probe_definer()` fails with SQLSTATE `42501` **and** the message
   `permission denied for function t2_probe` / `... t2_probe_definer`, using
@@ -242,13 +254,21 @@ Assertions (names may change; none may be dropped):
 - **Negative control (security's gate):** with the global revoke undone inside a transaction
   (`ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" GRANT EXECUTE ON FUNCTIONS TO PUBLIC;`), T1, T2 and T3 must fail.
   db-builder runs it once locally and records the result in the handoff; it isn't committed as a passing test.
-- **Proposed T6 (only if security accepts Question 1, option a):** assert that no per-schema `pg_default_acl` row
-  for `postgres` with `defaclobjtype = 'f'` grants EXECUTE to `PUBLIC`, `anon` or `authenticated`, except schema
-  `storage`. This catches a later migration that re-opens the gap with an `IN SCHEMA ... GRANT`.
+- **T6 (required; security's Q1 decision):** no `pg_default_acl` row with `defaclrole = 'postgres'::regrole`,
+  `defaclobjtype = 'f'`, `defaclnamespace <> 0` and a schema other than `storage` (exact name match, not
+  "Supabase-managed schemas" in general) has an `aclexplode(defaclacl)` entry with EXECUTE for grantee `0`
+  (`PUBLIC`), `anon`, `authenticated` or `service_role`. This catches a later migration that re-opens the gap with
+  an `IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS`. T6 is a per-schema guard: in the negative control it is expected
+  to still pass.
 
 Also: AC5 checks that the migration creates no objects (the probes exist only in the test transaction).
 
 ## Questions for security (security has the final say)
+
+**Answered** in `specs/2a/threat-model.md`, "Sign-off on schema.md (2026-11-25)": Q1 option (a), with T6
+required (grantees including `service_role`, exception exactly `storage`) and convention rule 5 extended; Q2 yes,
+with T1 checking the exact row. Both are applied above, plus the procedure probe in T2. Original questions kept
+for the record:
 
 1. **`storage` exception to "any schema".** Locally, role `postgres` has a per-schema default in `storage` that
    grants EXECUTE on functions to `anon`, `authenticated` and `service_role`. Per-schema rows are merged on top of

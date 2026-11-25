@@ -88,6 +88,18 @@ specs/2a/**     # schema.md (db-architect), threat-model.md + security-gate.md (
 - **Left to do:** person answers the Questions; db-architect writes `specs/2a/schema.md`; security writes `specs/2a/threat-model.md`; orchestrator sets SPEC_READY.
 - **Next role must know:** the drift check compares schema `public` only; db-architect should state whether a default-privilege change that isn't tied to a schema shows up in the drift diff and in production as expected.
 
+### db-architect, 2026-11-25
+
+- **Changed:** `specs/2a/schema.md` (commit 2fa3dd4), then edited for security's sign-off in `specs/2a/threat-model.md` (commit c084dc3):
+  - T6 is now required: no per-schema `postgres` function default row outside schema `storage` grants EXECUTE to PUBLIC, anon, authenticated or service_role.
+  - Convention rule 5 is extended: no functions in Supabase-managed schemas, and no `IN SCHEMA ... GRANT EXECUTE ON FUNCTIONS`.
+  - T1 asserts the global row is exactly `{postgres=X/postgres}`.
+  - T2 adds the procedure probe `public.t2_probe_proc()`.
+  - AC8 note: any production per-schema `postgres` function row other than `public`/`storage`, or a `storage` row that differs from local, goes to security.
+- **Verified:** read-only SELECTs on the local DB (`pg_default_acl`, `pg_proc` owners, `pg_extension`); CLI 3.2.0 `db diff --help` and the bundled pg-delta code for the drift answer. No DB writes, no reset, no cloud access.
+- **Left to do:** db-builder writes the migration and `supabase/tests/02_function_privileges_test.sql` per schema.md section 8 (T1-T6 and idempotence; the negative control is run once locally).
+- **Next role must know:** answer to the drift question above: very likely yes. pg-delta (the default engine in CLI 3.2.0) reads `defaclnamespace = 0` rows whatever `--schema` is, but no run has proven it. So AC8 also needs the read-only `pg_default_acl` check in schema.md section 7. Per security's sign-off, schema.md now matches without another security review.
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
