@@ -411,3 +411,8 @@ commit -> PASS with label T2.
   frozen `tasks/decisions.md` as a decision file, not an instruction to write to it); rest of AC13 unchanged.
   `npx vitest run tests/integration/task-scripts.test.ts tests/integration/gate-check.test.ts`: 117 passed (117),
   incl. the two AC20 multi-line label-time tests after devops-cicd's fix `717a9aa` (qa-test bug closed).
+
+### orchestrator, 2026-11-25 (verify)
+
+- Full `bash scripts/verify.sh` (with DB, after the 4a merge and qa-test's fixes; local stack env exported in the shell only): `verify.sh: PASS 19/19 (0 skipped)`.
+- New standing check for every step-4 security gate (the person's decision, `tasks/decisions/2026-11-25-4d-supabase-secrets-accepted-until-step4.md`, on the 4d branch): no PR adds or changes a workflow step that reads a `SUPABASE_*` secret outside `.github/workflows/drift.yml`.
