@@ -1,0 +1,83 @@
+name: drift
+
+# Read-only drift check: compares production with a database built from supabase/migrations.
+# Judged on the diff content, not the exit code. Never writes to production.
+on:
+  schedule:
+    - cron: "17 3 * * *" # nightly, 03:17 UTC
+  workflow_dispatch:
+  # After each deploy: add a workflow_run trigger on the deploy workflow once the deploy path exists.
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      DRIFT_SCHEMAS: public
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Require the production connection secrets
+        run: |
+          missing=""
+          for v in SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_PROJECT_ID; do
+            [ -n "${!v}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Drift check not configured. Missing GitHub Secrets:$missing"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install (lockfile only; brings the pinned Supabase CLI)
+        run: npm ci
+
+      - name: Link the production project (read-only use)
+        run: npx --no-install supabase link --project-ref "$SUPABASE_PROJECT_ID" # reads SUPABASE_DB_PASSWORD from env
+
+      - name: supabase db diff against production
+        id: diff
+        run: |
+          set -o pipefail
+          npx --no-install supabase db diff --remote --schema "$DRIFT_SCHEMAS" 2>diff.err | tee diff.sql || {
+            echo "::error::supabase db diff did not run"; cat diff.err; exit 1; }
+          # Judge on content: anything other than blank lines and SQL comments is drift.
+          if grep -vE '^[[:space:]]*(--.*)?$' diff.sql >/dev/null; then
+            echo "drift=yes" >> "$GITHUB_OUTPUT"
+            echo "::error::Drift: production differs from supabase/migrations"
+            exit 1
+          fi
+          echo "drift=no" >> "$GITHUB_OUTPUT"
+          echo "No drift."
+
+      - name: Open or update the drift issue
+        if: failure() && steps.diff.outputs.drift == 'yes'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const diff = fs.readFileSync('diff.sql', 'utf8').slice(0, 60000);
+            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `Drift check failed (${run}). Production differs from \`supabase/migrations\`.\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.\n\n\`\`\`sql\n${diff}\n\`\`\``;
+            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'drift' });
+            if (open.length) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
+            } else {
+              await github.rest.issues.create({ ...context.repo, title: 'Drift: production differs from migrations', labels: ['drift'], body });
+            }

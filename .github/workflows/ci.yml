@@ -1,0 +1,101 @@
+name: ci
+
+# Required checks on main: verify, db-check, secrets (job names must not change).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned tool versions. Upgrade one tool per commit (rules/database-and-deploy.md rule 9).
+  GITLEAKS_VERSION: 8.30.1
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # verify.sh diffs against origin/main
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Use the pinned npm (package.json#packageManager)
+        run: npm install -g "$(node -p "require('./package.json').packageManager")"
+
+      - name: Install (lockfile only)
+        run: npm ci
+
+      - name: Install gitleaks (pinned, checksum verified)
+        run: bash scripts/ci/install-gitleaks.sh "$GITLEAKS_VERSION"
+
+      - name: verify.sh
+        env:
+          CI: "true"
+          DESTRUCTIVE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'destructive-approved') && '1' || '' }}
+        run: bash scripts/verify.sh
+
+  db-check:
+    name: db-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install (lockfile only; brings the pinned Supabase CLI)
+        run: npm ci
+
+      - name: Reject CR line endings in migrations
+        run: |
+          if grep -rlU $'\r' supabase/migrations/*.sql 2>/dev/null; then
+            echo "CR line endings found in the migrations above"; exit 1
+          fi
+
+      - name: supabase start
+        run: npx --no-install supabase start
+
+      - name: supabase db reset (all migrations on an empty database)
+        run: npx --no-install supabase db reset
+
+      - name: supabase test db
+        run: npx --no-install supabase test db
+
+      - name: supabase db lint
+        run: npx --no-install supabase db lint --level error --fail-on error
+
+      - name: supabase stop
+        if: always()
+        run: npx --no-install supabase stop --no-backup
+
+  secrets:
+    name: secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # scan the full history
+
+      - name: Install gitleaks (pinned, checksum verified)
+        run: bash scripts/ci/install-gitleaks.sh "$GITLEAKS_VERSION"
+
+      - name: gitleaks (full history)
+        run: gitleaks detect --source . --redact --no-banner --verbose
