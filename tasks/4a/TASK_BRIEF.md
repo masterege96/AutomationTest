@@ -199,3 +199,35 @@ a template, it stops and asks (`BLOCKED`) rather than widening the scope.
     still change in review.
   - Both scripts need bash 4+ (`[[ =~ ]]`, arrays); Git Bash 5.2 and ubuntu bash 5 are fine. Invoke Git Bash on
     Windows (not WSL), write fixtures with LF (the scripts also strip CR).
+
+### qa-test, 2026-11-25
+
+- **Changed:** `tests/integration/task-scripts.test.ts` (new, commit 1b1ec27). No fixture files in the repo: each test
+  writes its `tasks/` tree into a fresh `fs.mkdtemp` dir (LF; two tests use CRLF) and runs the script there; AC5 and AC9
+  run against this repo's own `tasks/`. On Windows the tests call `%ProgramFiles%\Git\bin\bash.exe` (never a WSL
+  `bash` from PATH); elsewhere plain `bash`.
+- **Coverage (39 tests):**
+  - board.sh: AC1 exact table incl. trimmed cells and a State note, CRLF brief; AC2 the AC's dirs (`0, 2, 2b, 3c, 10`,
+    `4`/`incidents`/`decisions` skipped) and `1, 1b, 2, 2a, 2c, 11, 12`; AC3 combined fixture (no State row with a
+    "State" word in the Handoff, empty, `WAITING (...)`, `DONEISH`, heading with another id, later State row ignored):
+    raw rows, one stderr line per problem, exit 1; each problem alone (5 cases) -> one line; all 7 states valid with and
+    without a note (7 cases); AC4 usage/exit 2 (3 arg variants), no `tasks/` exact message/exit 2, empty `tasks/` ->
+    two header lines, `$(...)`/backticks printed as text and no file created; AC5 on the repo: no `tasks/board.md`,
+    exit 0, no stderr, board.md's DONE rows DONE, 2b/3 their board.md cell (or DONE later), 3c `DONE`, a `4a` row.
+  - lessons.sh: AC6/AC7 exact output for fixed/Closed/INFO/open/no status/mid-heading status/last-parens/`unfixed`/
+    parens-not-at-end/`fixed-ish`, non-headings ignored, `Closes:` across files with leading blanks, numeric id and
+    `<n>` order, summary counts; same-file and cross-file `Closes:`; CRLF; zero-open summary (3 cases); AC8 combined
+    malformed `tasks/5x/lessons.md` (wrong id, `.0`, `.a`, duplicate, unknown `Closes:`) -> 5 stderr lines, good
+    lessons listed, exit 1; each alone (5 cases); usage/exit 2; no `tasks/` exit 2; missing archive ok; content not
+    executed; AC9 on the repo: archive part = the 14 ids (minus any a later task closes with its own `Closes:`),
+    `Closes: L16, L19, L23` in `tasks/4a/lessons.md`, summary consistent, exit 0.
+  - Static: AC10 `git diff 5c3aa7e` of each archive = exactly one added line, nothing removed, line 2 under the title
+    contains the phrase (skipped only if 5c3aa7e isn't in the clone; CI uses fetch-depth 0); AC13 the brief's `git grep`
+    has no `tasks/board.md` and every hit is an archived-entry citation, a frozen/archive description, or lessons.sh.
+  - The real-repo tests are written to survive later state moves and lesson closes, not only today's values.
+- **Verified:** `npx vitest run tests/integration/task-scripts.test.ts`: 39 passed. `npm test`: 13 files, 250 tests
+  passed. `npx tsc --noEmit` and `npx eslint tests/integration/task-scripts.test.ts`: clean. Not run: `verify.sh`
+  (local stack env not exported here, as in devops-cicd's entry).
+- **Script bugs found:** none. All AC1-AC9 behaviour matches the brief and devops-cicd's stated choices.
+- **Left to do:** security gate, review, the person's `framework-change-approved` label; CI (Linux) run of `npm test`
+  for AC15. 4a's State is still `SPEC_READY` (orchestrator moves it).
