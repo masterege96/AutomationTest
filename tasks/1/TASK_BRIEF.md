@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_PROGRESS |
+| State | IN_REVIEW |
 | Owner role | db-architect (spec), db-builder (migration, tests) |
 | Branch | `db/1-default-privileges` |
 | Worktree | none (repo root; single builder, no parallel work) |
@@ -19,7 +19,7 @@ or `MAINTAIN`. After the Supabase integration applies the migration, the drift c
 - [ ] AC1: One migration (`supabase migration new default_privileges_baseline`) contains the 12 default-privilege statements that match production exactly (incident report), unchanged.
 - [ ] AC2: The same migration revokes `TRUNCATE, TRIGGER, REFERENCES, MAINTAIN` on future tables in `public` (role `postgres`) from `anon` and `authenticated`. `service_role` keeps what production has.
 - [ ] AC3: The migration is idempotent (applying it again changes nothing) and creates no tables.
-- [ ] AC4: A pgTAP test creates a table, a sequence and a function inside the test transaction and asserts: `anon` and `authenticated` have no privileges on them; `service_role` has exactly `MAINTAIN, REFERENCES, TRIGGER, TRUNCATE` on the table and nothing on the sequence or function.
+- [ ] AC4: A pgTAP test creates a table, a sequence and a function inside the test transaction and asserts: `anon` and `authenticated` have no privileges on the table or sequence; `service_role` has exactly `MAINTAIN, REFERENCES, TRIGGER, TRUNCATE` on the table and nothing on the sequence. Function EXECUTE is not asserted: Postgres grants it to `PUBLIC` by default, which per-schema default privileges can't remove (schema.md test item 6; follow-up for security). (Reworded 2026-11-25 after review F1.)
 - [ ] AC5: `verify.sh` passes; security gate PASS; review APPROVE; CI green.
 - [ ] AC6 (after merge, the person merges): production migration history shows both migrations (read-only check) and a default drift run is green; issue #4 closed.
 
