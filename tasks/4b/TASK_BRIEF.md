@@ -271,3 +271,39 @@ protected path, merge main into this branch **before** the gates run (old gate, 
   ship the rest; never fall back to commit dates.
 - 4a (open in parallel) replaces `tasks/board.md` with `scripts/board.sh` and adds `tasks/decisions/**`; this brief's
   State row is the board entry.
+
+### devops-cicd, 2026-11-25 (Q1 interface, for qa-test)
+
+gate-check.sh reads the label state from three **environment variables**. They are consulted only when the PR's
+net change (MB..HEAD) touches a protected path; otherwise they are ignored. gate.yml fills them from the GitHub API
+(see the build entry); fixture tests set them directly (no network, no token).
+
+| Variable | Meaning | Format |
+|----------|---------|--------|
+| `FRAMEWORK_CHANGE_APPROVED` | `1` when the label is on the PR now (unchanged from today). Anything else = no label. | `1` |
+| `FRAMEWORK_LABEL_TIME` | GitHub server time of the most recent `labeled` event for `framework-change-approved`. | exactly `YYYY-MM-DDTHH:MM:SSZ` (UTC) |
+| `PR_HEAD_PUSHES` | Every push GitHub recorded on the PR's head branch: one line per push, `<time> <tip-sha>`, where `<time>` is GitHub's server time of the push and `<tip-sha>` the branch tip after it (full 40-hex SHA). Any order (gate-check sorts by time, stable). Blank lines ignored. | `2026-11-25T18:28:39Z 7f12f986e36e175fdb72bad96cd0c5ea0492a4ab` per line |
+
+Rules gate-check applies (commit author/committer dates are never read):
+
+1. **Last protected change C**: walk HEAD's first-parent chain back to MB; C is the oldest commit of the trailing run
+   whose net protected change (`git diff <merge-base(base, X)> X -- <protected paths>`) equals HEAD's.
+2. **Push time of C**: go through the pushes in time order; a push "contains C" when its tip is C or a descendant
+   of C (tips git doesn't know, e.g. `0000...` for a branch deletion or a force-pushed-away tip, don't contain C).
+   The push time is the time of the **latest** push that contains C while the push before it did not (or was the
+   first). So a C pushed, removed and pushed again counts from the re-push.
+3. **Label current**: `FRAMEWORK_LABEL_TIME` is strictly later than C's push time (same second = stale).
+
+Output lines (prefixes the tests can match):
+
+- label absent: `  FAIL  pipeline/framework files changed without the person's 'framework-change-approved' label:` + one indented line per protected path (today's line).
+- label current: `  PASS  pipeline/framework files changed, approved by the person` ...
+- label older than C's push: `  FAIL  framework-change-approved label is older than the last change to protected files` ... + one indented line per protected path in the PR's net change.
+- label present but `FRAMEWORK_LABEL_TIME` missing/empty/not that exact format: `  FAIL  framework-change-approved label time could not be read` ...
+- label time OK but `PR_HEAD_PUSHES` missing/empty, a malformed line, or no push whose tip is HEAD's SHA (`git rev-parse HEAD`): `  FAIL  push time of the last protected change could not be read` ...
+
+Fixture hints for AC17-AC21: set `FRAMEWORK_CHANGE_APPROVED=1`, `FRAMEWORK_LABEL_TIME`, and `PR_HEAD_PUSHES` with
+a line for each simulated push's tip SHA (at least one line for the current HEAD). Example AC18: pushes
+`T1 <sha after first scripts/x.sh + gates>`, `T3 <sha after second scripts/x.sh + gates>`, label `T2` (T1<T2<T3) ->
+FAIL; label `T4` (> T3) -> PASS. AC19: second push tip changes only `app/feature.ts` -> C stays the first push's
+commit -> PASS with label T2.
