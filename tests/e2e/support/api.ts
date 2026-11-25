@@ -42,7 +42,11 @@ export class Api {
     for (const [k, v] of Object.entries(opts.headers ?? {})) headers[k.toLowerCase()] = v;
     const finalHeaders: Record<string, string> = {};
     for (const [k, v] of Object.entries(headers)) if (v !== null) finalHeaders[k] = v;
-    const response = await this.ctx.fetch(path, { method, headers: finalHeaders, data: body, failOnStatusCode: false });
+    // Always a Buffer: with a JSON content type, Playwright JSON-encodes a string `data` that isn't valid JSON
+    // (playwright-core coreBundle.js, isJsonContentType + isJsonParsable), so `not json` would arrive as
+    // `"not json"`. A Buffer is sent byte for byte.
+    const data = body === undefined ? undefined : Buffer.from(body, "utf8");
+    const response = await this.ctx.fetch(path, { method, headers: finalHeaders, data, failOnStatusCode: false });
     const text = await response.text();
     let json: unknown = undefined;
     try {
