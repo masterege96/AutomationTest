@@ -1,83 +1,71 @@
 Result: APPROVE
 
-# Code review: task 0, drift artifact (`ci/0-drift-artifact`), re-run
+# Code review: task 0, drift artifact (`ci/0-drift-artifact`), re-run after the main merge
 
 - **Reviewer:** code-reviewer (fresh context, no builder conversation; judged from the repo only)
 - **Date:** 2026-11-25
-- **Branch / HEAD reviewed:** `ci/0-drift-artifact` @ `21b0e2c`; whole diff `git diff origin/main...HEAD` (`.github/workflows/drift.yml`, `roles/devops-cicd.md`, `tasks/decisions.md`, plus the gate files), focus on `e643765` (S28: gitleaks scan of `diff.sql` before upload; S29: upload only if `supabase db diff` exited 0).
-- **Previous review:** `a4d1885` (APPROVE, nits N1-N4).
-- **Security gate:** `specs/0/security-gate.md` = PASS (re-run `21b0e2c`, after the code commit). Read; this review was done independently.
+- **Branch / HEAD reviewed:** `ci/0-drift-artifact` @ `b4614f8` (security gate) on top of `772a10d` (merge of `origin/main` @ `05cc5d9`, PR #3). Merge-base with `origin/main` = `05cc5d9` = `origin/main`.
+- **Why re-run:** the merge commit counts as a code change, so the previous review (`b228e84`, APPROVE, nits N1-N3, N5, N6) no longer counts.
+- **Security gate:** `specs/0/security-gate.md` = PASS (`b4614f8`, after the merge). Read; this review was done independently.
 - **Decision implemented:** `tasks/decisions.md:12` (repo stays public; a manual run with `upload_diff=true` may upload the raw diff as a 1-day artifact; schedule and default runs never expose it).
 
 ## Verdict
 
-`e643765` does what it says. The upload now needs three things on an opt-in manual run: the CLI
-exited 0 (`diff_ok`), gitleaks ran and found nothing (`clean`), and the earlier conditions. Every
-failure path (CLI error, gitleaks hit, gitleaks error, gitleaks not installed) skips the upload. The
-drift issue still opens on every drift run, whatever the scan does. No blockers, no should-fix.
+The merge is clean and changes nothing in the PR's own code: `drift.yml` is byte-identical to what
+`b228e84` approved, both conflict resolutions keep both sides, and PR #3's changes (removal of the
+temporary in-PR `gate` job, comments in `gate.yml` and `gate-check.sh`, item-3 wording in
+`roles/devops-cicd.md`) do not touch anything drift.yml or its docs rely on. The drift.yml analysis
+from `b228e84` (step order, conditions, gitleaks exit-code handling, failure-path table) still holds.
+No blockers, no should-fix.
 
-## Step order and conditions (drift.yml)
+## Merge check
 
-Steps as parsed by js-yaml: 5 `diff` (id `diff`), 6 install gitleaks, 7 scan (id `scan`), 8 upload, 9 issue.
-Steps 6-8 all start with `always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true'`; step 8 adds `&& steps.scan.outputs.clean == 'true'`.
-Both `steps.diff.*` and `steps.scan.*` point at real step ids that run earlier in the job.
+| Check | Evidence | Result |
+|---|---|---|
+| PR net change | `git diff --stat origin/main...HEAD`: `.github/workflows/drift.yml` (+40), `roles/devops-cicd.md` (1 line, item 5), `tasks/decisions.md` (+1 row), `specs/0/review.md`, `specs/0/security-gate.md`. Nothing else. | OK |
+| drift.yml unchanged since last review | `git diff b228e84 HEAD -- .github/workflows/drift.yml`: empty | OK |
+| What the merge brought in | `git diff b228e84 HEAD --stat`: `ci.yml`, `gate.yml`, `roles/devops-cicd.md`, `scripts/gate-check.sh`, `tasks/0/TASK_BRIEF.md`, `tasks/decisions.md`, `tasks/lessons.md` (all PR #3 = `05cc5d9`), plus `specs/0/security-gate.md` (the new gate). | OK |
+| `tasks/decisions.md` | net change vs main is exactly one added row (`:12`, drift artifact); main's S14 row kept (`:13`). See N7 for order. | OK |
+| `roles/devops-cicd.md` | `:48` has PR #3's item-3 `merge-gate` wording (`--head "$HEAD_SHA"`); `:53` has the branch's item-5 upload paragraph. Only item 5 differs from main. | OK |
+| Conflict markers | `grep -rn '^<<<<<<<\|^=======$\|^>>>>>>>'` over the repo (excl. `.git`, `node_modules`): none. `git diff --check origin/main...HEAD`: clean. | OK |
+| `specs/0/*` | branch's files kept; security gate re-run after the merge, this file rewritten after it. Each has exactly one `Result:` line, on line 1. | OK |
 
-| Case (opt-in manual run unless stated) | Install | Scan | Upload | Issue | Run |
-|---|---|---|---|---|---|
-| Schedule / default dispatch | skipped | skipped | skipped | only on drift (as before) | as before |
-| No drift (`diff_ok=true`, `drift=no`, step 0) | runs | runs, `clean=true` | runs | no (`drift != yes`) | green |
-| Drift (`diff_ok=true` written at `:83` before `drift=yes` + `exit 1` at `:89-91`) | runs (`always()`) | runs | runs if clean | yes: `failure()` true, `drift == 'yes'` | red |
-| CLI failure (`:79-80` exits before `:83`) | skipped | skipped | skipped | no (`drift` empty) | red |
-| Earlier step fails (secrets, `npm ci`, link) | skipped (`diff_ok` empty) | skipped | skipped | no | red |
-| gitleaks hit (RC 99, `:115`) | ran | fails, no `clean` | skipped | drift run: yes; no-drift run: no | red |
-| gitleaks error (RC 1, unknown flag 126, other) | ran | fails, no `clean` (`:116`) | skipped | as above | red |
-| Install fails | fails | still runs (`always()`); `gitleaks` missing, RC 127, `:116` | skipped | as above | red |
+## PR #3 interaction with drift.yml and the docs
 
-`failure()` in the issue step (`:129`) is true whenever any earlier step failed; a failed scan or
-upload on a drift run cannot hide the issue, and on a no-drift run the `drift == 'yes'` term keeps
-the issue closed. Outputs written before a step exits non-zero are kept, which the issue step
-already relied on for `drift=yes`, so `diff_ok` from the failed drift step is usable too.
+| PR #3 change | Effect on this PR | Result |
+|---|---|---|
+| `ci.yml`: in-PR `gate` job removed, header comment +1 line | No drift reference. `GITLEAKS_VERSION: 8.30.1` now at `ci.yml:19` (was `:18`), value unchanged, so `drift.yml:34` "same pin as ci.yml" still true. Same installer `scripts/ci/install-gitleaks.sh` (`ci.yml:43, 98`), not changed by PR #3. `ci.yml:101` still uses `gitleaks detect`, matching `drift.yml:110` (N5). | OK |
+| `gate.yml`: comment only (credential-less fetch works because the repo is public) | Consistent with `tasks/decisions.md:12` (repo stays public). No behavior change. | OK |
+| `scripts/gate-check.sh`: header comment only (first non-empty line rule, framework label) | Both gate files start with their `Result:` line; this PR touches `.github/workflows` and `roles`, so it needs `framework-change-approved`. | OK |
+| `roles/devops-cicd.md` item 3 | Different paragraph from item 5; no overlap. | OK |
+| `tasks/0/TASK_BRIEF.md`, `tasks/lessons.md` | Docs only; brief's allowed paths still cover this PR's files (verify.sh scope check passes). | OK |
 
 ## Other checks
 
-| Claim | Evidence | Result |
+| Check | Evidence | Result |
 |---|---|---|
-| `GITLEAKS_VERSION` matches ci.yml | `drift.yml:34` `8.30.1` (job env); `ci.yml:18` `8.30.1`; same installer `scripts/ci/install-gitleaks.sh` (pinned tarball, release checksum `sha256sum -c`, `set -euo pipefail`) as `ci.yml:41-42, 96-97` | OK |
-| gitleaks flags valid for v8.30.1 | `cmd/detect.go@v8.30.1`: `--no-git` (Bool), `--source`/`-s`; `cmd/root.go`: persistent `--exit-code` (Int, default 1), `--redact` (Uint, `NoOptDefVal` 100), `--no-banner`, `--log-level` (`error` valid). Exit codes: findings, `os.Exit(exitCode)` = 99; scan error, `os.Exit(1)` (checked before findings, so an erroring scan is never read as clean); unknown flag, 126; fatal, 1 | OK |
-| Config / ignore files | no `GITLEAKS_CONFIG*` env in the job; `root.go` loads `.gitleaks.toml` from `--source`, which is the fresh `mktemp -d` holding only `diff.sql`, so the default rules apply with no allowlist and no `.gitleaksignore` | OK |
-| `set +e` / `set -e` under `bash -e` | `:109-112`: every RC reaches the `case`; `mktemp`/`cp` failures fail the step without `clean` | OK |
-| Nothing printed | `>/dev/null 2>&1` at `:110`, no report path; only fixed messages reach the public log | OK |
-| YAML parses | js-yaml (node_modules): 10 steps in the order above, job env `{"DRIFT_SCHEMAS":"public","GITLEAKS_VERSION":"8.30.1"}` | OK |
-| Docs match behavior | `roles/devops-cicd.md:53`: upload only if `supabase db diff` exited 0 and gitleaks finds it clean, message "possible secret in production schema, not uploaded" (= `drift.yml:115`), delete after download, schedule/default never expose it. Comment `drift.yml:96-98` says the same. `tasks/decisions.md:12` states the person's decision; the extra guards only narrow it | OK |
-| Scope | `.github/workflows/*`, `roles/*`, `tasks/*`, all in the brief's allowed paths. Framework/pipeline files, so the PR needs the person's `framework-change-approved` label (AGENT_RULES 18a) | OK (label is the person's) |
+| YAML parses | js-yaml (node_modules): `ci` jobs `verify,db-check,secrets`; `gate` job `merge-gate`; `drift` job `drift`, 10 steps: 5 `diff` (id `diff`), 6 install gitleaks, 7 scan (id `scan`), 8 upload, 9 issue; `if:` expressions on 6-9 as approved in `b228e84` | OK |
 | verify.sh | `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker): `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script) | OK |
-
-## Earlier nits
-
-| # | Status |
-|---|---|
-| N1 (issue body says the log shows only a line count and hash; the artifact is the other way to see the diff) | still applies, see N1 below |
-| N2 (red no-drift opt-in run without an issue) | still applies, and now also covers a gitleaks hit/error on a no-drift run, see N2 below |
-| N3 (fixed artifact name, `overwrite: false`, re-run) | still applies, see N3 below |
-| N4 ("deletes" read as a fact) | fixed: `drift.yml:98` now says "must delete" |
+| Docs match behavior | `roles/devops-cicd.md:53` and `drift.yml:96-98` agree with `drift.yml:79-126` (diff_ok after CLI exit 0, gitleaks clean, message at `:115`, 1-day retention, delete after download) | OK |
 
 ## Findings
 
-No `blocker`, no `should-fix`.
+No `blocker`, no `should-fix`. N1-N3, N5, N6 carried from `b228e84` (code unchanged); N7 new.
 
 | # | File:line | Severity | What is wrong | Owner |
 |---|---|---|---|---|
-| N1 | `.github/workflows/drift.yml:135` | nit | Issue body says "The run log shows only a line count and hash" and points db-builder at a local `db diff`; a manual `upload_diff=true` run (now gitleaks-checked) is the other way to see the diff. Optional one-line mention, still never pasting the diff. | devops-cicd |
-| N2 | `.github/workflows/drift.yml:103-117` | nit | On a no-drift opt-in run, a gitleaks hit, a gitleaks error or an upload failure turns the run red with no issue. The error lines say why ("possible secret in production schema, not uploaded" / "gitleaks could not run"), and a manual run has someone watching, so fine; but a hit means a secret-looking string sits in the production schema, which is worth following up by hand even with no drift. | devops-cicd |
-| N3 | `.github/workflows/drift.yml:123` | nit | Fixed name `drift-diff` with the default `overwrite: false`; unverified whether "Re-run failed jobs" on the same run conflicts with the first attempt's artifact. If it does, the re-run's upload fails (closed, harmless); `overwrite: true` would avoid it. | devops-cicd |
-| N5 | `.github/workflows/drift.yml:110` | nit | `gitleaks detect --no-git --source` is the legacy form (`cmd/detect.go@v8.30.1` marks it "OLD CMD"; the current one is `gitleaks dir`). It works in the pinned 8.30.1 and matches the `detect` usage in `ci.yml:100`, so no change now; revisit when the pin is bumped. | devops-cicd |
+| N1 | `.github/workflows/drift.yml:135` | nit | Issue body says "The run log shows only a line count and hash" and points db-builder at a local `db diff`; a manual `upload_diff=true` run (gitleaks-checked) is the other way to see the diff. Optional one-line mention, still never pasting the diff. | devops-cicd |
+| N2 | `.github/workflows/drift.yml:103-117` | nit | On a no-drift opt-in run, a gitleaks hit, a gitleaks error or an upload failure turns the run red with no issue. The error lines say why and a manual run has someone watching, so fine; but a hit means a secret-looking string sits in the production schema, worth following up by hand even with no drift. | devops-cicd |
+| N3 | `.github/workflows/drift.yml:123` | nit | Fixed artifact name `drift-diff` with the default `overwrite: false`; unverified whether "Re-run failed jobs" conflicts with the first attempt's artifact. If it does, the re-run's upload fails (closed, harmless); `overwrite: true` would avoid it. | devops-cicd |
+| N5 | `.github/workflows/drift.yml:110` | nit | `gitleaks detect --no-git --source` is the legacy form (current: `gitleaks dir`). Works in the pinned 8.30.1 and matches `ci.yml:101`; revisit when the pin is bumped. | devops-cicd |
 | N6 | `.github/workflows/drift.yml:110, 116` | nit | All gitleaks output goes to `/dev/null`, so "gitleaks could not run (exit N)" gives only the exit code to debug from. Deliberate (public log, S18) and fails closed; noting it so a future fix does not just drop the redirect. | devops-cicd |
+| N7 | `tasks/decisions.md:12-13` | nit | The file says "Newest last", but the merge put the drift-artifact row before main's S14 row, which landed on main first. Same date, so harmless; if order matters, move `:12` below `:13` in a later docs change (not worth a re-gate now). | git-release |
 
 ## Carried
 
 Security items from the PR #2 gates (S14, S5, S15, S16, S19, S20/S21, S23, S24, S26, S27) are
-unchanged by this PR. S19 (nothing verifies the `production` environment's main-only policy) also
-guards this artifact path.
+unchanged by this PR. S14 is now recorded as accepted for the pilot (`tasks/decisions.md:13`). S19
+(nothing verifies the `production` environment's main-only policy) also guards this artifact path.
 
 ## Before merge
 
