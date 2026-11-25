@@ -400,3 +400,61 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
 - **Left:** qa-test adds AC35-AC37 to `tests/integration/**` (fixture: a temp `tasks/decisions/` with/without the
   decision and closing files). Before 4i: the person moves the secrets (L4d.1), then a closing decision file, after which
   bootstrap-check FAILs again until the settings are fixed.
+
+### qa-test, 2026-11-25
+
+- **Changed:** `tests/integration/verify-fixes.test.ts` (new, commit `482639d`; 151 tests). No fixture files: SQL samples are
+  inline strings; fixtures are temp git repos outside the worktree (removed after the run). Stubs on `PATH`: `supabase`
+  (`status -o env` from a per-run file; exit 1 = stack not running), `npm` (`npm run <script>` straight from package.json,
+  for speed), `gh` (canned JSON or `gh: ... (HTTP <code>)` on stderr per endpoint; logs every call). The real `gh`,
+  Docker, network and the local stack are never used. Every token-shaped value is generated at run time (random bytes);
+  literal prefixes are split in the source. Git Bash is called as `%ProgramFiles%\Git\bin\bash.exe` on Windows.
+- **Verified:** `npx vitest run tests/integration/verify-fixes.test.ts`: 151 passed (~3 min, Windows). `npm test`:
+  14 files, 401 passed, exit 0 (stack down). `npx eslint` on the file: clean. No script bugs found: every AC1-AC31 and
+  AC35-AC37 expectation matches the scripts as committed at `713f254`.
+- **AC -> test map** (`tests/integration/verify-fixes.test.ts`, all integration level; test names start with the AC id):
+
+| AC | Tests (describe block / cases) |
+|----|------|
+| AC1 | client-bundle scan: "AC1: bundle line moved ..." ([secrets] has no bundle line; exact [project] line list; last result line) |
+| AC2 | "AC2: clean tree ..." (PASS, exit 0, `status -o env` called exactly once after the build) |
+| AC3 | 3 tests: build writes nothing; only empty `.next/static`/`dist`/`build`; stale bundle + build writes nothing |
+| AC4 | 3 tests: build fails (clean); build fails with stale leaking bundle (not scanned, no status call); `build` script missing |
+| L4d.2 | 3 tests: copied files with old mtime count; rewritten stale files count; new old-mtime file in a stale dir is scanned |
+| AC5 | 5 tests (one per server name, exact line + detail lines) + several names in contract order + CRLF status + unquoted status; decision: 7-char value ignored, 8-char compared |
+| AC6 | every AC5/AC11 test plus "AC6: failing run with all five" and "AC6: passing run": no value in stdout/stderr, `/tmp/verify-*.log`, run TMPDIR, working tree; no build marker left |
+| AC7 | "AC7: ANON_KEY, PUBLISHABLE_KEY, API_URL and the other URLs ..." -> PASS |
+| AC8 | stack down + `sb_secret_`+20; stack up + unknown `sb_secret_` key |
+| AC9 | stack up; stack down; payload with spaces around `:` |
+| AC10 | bare prefix / `…` / 19-char body / anon JWT / word `service_role`, stack up and stack down |
+| AC11 | 5 shell-exported names; 15-char value ignored; `sk_live_`, `sk_test_`; `dist/` scanned; `build/` alone scanned |
+| AC12 | info line between `npm run build` and the PASS, exit 0 |
+| AC13 | CI + status fails; CI + no SERVICE_ROLE_KEY; CI + leak -> one leak FAIL with `required in CI` detail; CI + stack up -> PASS |
+| AC14 | privilege lists upper/lower case + multi-line `REVOKE ALL`; decision: `ALTER DEFAULT PRIVILEGES` grants/revokes; repo's `20261125135502_default_privileges_baseline.sql` as a new migration -> PASS |
+| AC15 | `--`, trailing `--`, multi-line and nested `/* */`, comment after a GRANT -> PASS |
+| AC16 | 14 tests, one per statement: FAIL, file name, `2:<line>`; plus committed migrations are not scanned |
+| AC17 | 6 tests incl. `'--'` / `'/*'` in strings, statement after a multi-line REVOKE, after `/* c */` |
+| AC18 | `DESTRUCTIVE_APPROVED=1` -> approved PASS, exit 0 |
+| AC19 | delete in a `$$` body; GRANT inside a body doesn't exempt the next delete |
+| AC20 | FAIL right before `npm run test` with path + hint (node_modules/.next/tests/e2e excluded); 8 extensions; max 5 paths |
+| AC21 | fixture PASS in position; this repo's `scripts.test` has no flag |
+| AC22 | no test files; only `tests/e2e`/`node_modules`/`.next` test files |
+| AC23 | no test script -> no L5 line, old FAIL + detail unchanged |
+| AC24 | `roles/qa-test.md` "Done when (gate)" bullets exactly as the brief |
+| AC25 | compact and pretty JSON: 3 PASS, exact gh calls, all `--method GET` (no write flags) |
+| AC26 | env 404: both FAIL, fix text, no policy call |
+| AC27 | 9 tests: a (null, key absent), b, c, d (`*`, `ma*`), e (tag; no explicit type), empty list; no decision file -> FAIL |
+| AC28 | exact found line + fix, OTHER_TOKEN never printed; 2 pages, look-alike name, sorted list |
+| AC29 | `--offline`: two SKIP lines, no gh call |
+| AC30 | gh not on PATH; `gh auth status` fails (no api call) |
+| AC31 | 403 env (both lines); 403 policies; 403 secrets; 404 secrets; error without HTTP code -> `gh api failed` |
+| AC32 | review (diff); covered indirectly by AC1/AC23/AC27-AC31 exact-line checks of unchanged lines |
+| AC33 | orchestrator's run (needs the local stack); not automated here |
+| AC34 | "AC34: test sources hold no secret-shaped strings" (static: this file + `tests/integration/fixtures/4d/`); gitleaks in CI |
+| AC35 | decision open: exact [github] lines (2 RISK + fix lines), `PASS p/p+2 (2 accepted risks, 0 skipped)`, exit 0; each AC27 case -> RISK, `1 accepted risk`; secrets-only -> 1 RISK; decision's own backticked mention isn't an exact line |
+| AC36 | closing LF, CRLF, no final newline, subfolder; decision missing (with/without other decisions) -> exact old FAIL lines, no risk text, exit 1; closed == missing byte-identical; 10 non-exact close lines (indent, tab, prefix, bold, backticks, trailing text/space, case, other name, path) -> still RISK; exact line outside `tasks/decisions/` -> RISK; decision files never executed |
+| AC37 | open + AC25 settings -> 3 PASS, no risk text; env 404 -> FAIL x2 + secrets RISK; 403 secrets + policy null -> `FAIL 1 of <t> ... (1 accepted risk, 0 skipped)`; 404 secrets; 403 policies; 403 env; gh auth fails; `--offline` |
+
+- **Left / must know:** AC33 (full run with the stack) and AC34 (CI checks, gitleaks) are the orchestrator's. The file takes
+  ~3 minutes on Windows (each case spawns Git Bash on a temp repo); tests run concurrently. AC6 reads Git Bash's shared
+  `/tmp/verify-*.log` files; fixtures never print values, so concurrent runs can't cause false hits.
