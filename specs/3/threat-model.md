@@ -70,7 +70,9 @@ plus:
   `x-middleware-subrequest: proxy:proxy:proxy:proxy:proxy`, `x-middleware-subrequest: src/middleware`,
   `x-middleware-prefetch: 1`, `next-router-prefetch: 1`, `purpose: prefetch`, `sec-purpose: prefetch`, `rsc: 1`,
   `x-nextjs-data: 1`, `x-user-id: <A's id>`. Expected: API 401 with no data and DB unchanged; page shows the sign-in
-  screen with no to-do data in the HTML.
+  screen with no to-do data in the HTML. **One documented exception, `rsc: 1` on the API (section 3.7):** the API
+  case expects 307 to `?_rsc`, then 401 on the followed request, with the exact assertion in 3.7. `x-middleware-prefetch: 1`
+  has no exception: it must give 401 (fixed in `proxy.ts`, see 3.7).
 - **T2 (forged token):** cookies holding (a) a JWT signed with a wrong key, (b) an `alg: none` JWT with A's `sub`,
   (c) an expired JWT of A, (d) random bytes: every to-do API returns 401, DB unchanged.
 - **T3 (role from metadata):** grep check in the gate: no code under `app/`, `lib/`, `proxy.ts` reads
@@ -187,6 +189,58 @@ The proxy may redirect signed-out page requests to sign-in as UX, but each page 
   would be skipped by a client-chosen header). See section 6.4.
 - If the app is ever deployed behind a CDN/reverse proxy, that layer must strip `x-middleware-subrequest` from incoming
   requests (deploy note for the person when a host is chosen).
+
+### 3.7 Framework answers before the handler: `x-middleware-prefetch` and `rsc` (AC21/T1 amendment, 2026-11-25)
+
+qa-test's integration run found two T1 headers that Next answers itself before any route handler runs, so the
+handler's `getUser()` never gets to say 401. In both cases no handler ran, no data was returned and the DB was unchanged.
+
+**`x-middleware-prefetch: 1` (fixed, no exception).** Next answered it with 200 `{}` (`next/dist/server/base-server.js`,
+middleware-prefetch bail-out). `proxy.ts` now deletes that one header from the **forwarded** request for `/api` and
+`/api/*` only (`API_STRIPPED_HEADERS`); pages keep it (Next's normal page prefetch). This is header hygiene, not
+authorization: the proxy still decides nothing and answers nothing, and each handler's `getUser()` returns 401. T1
+keeps its original expectation for this header: 401, no data, DB unchanged. The gate checks that the strip stays
+limited to `/api` and to this one header.
+
+**`rsc: 1` (decision: option (a), documented exception).** Next marks the request as an RSC request from the
+original header (request meta; the proxy's forwarded-header edits don't clear it) and, because the request has no
+matching `_rsc` cache-busting value, answers 307 to `<same path>?_rsc` before routing to the handler
+(`base-server.js`, `validateRSCRequestHeaders` check; docs `01-app/02-guides/cdn-caching.md`: "when an RSC request
+arrives without the correct `_rsc` value, the server responds with a 307 redirect"). Options considered:
+- (a) **Chosen.** Accept the 307 as a documented exception; T1 asserts 307 → follow → 401. The property AC21 protects
+  (the server, not the proxy, decides; no data; no write) still holds: the 307 has an empty body, the `Location` is
+  the same path on the same origin plus `?_rsc` (no host from the request), 307 keeps method and body, and the
+  followed request reaches the handler, whose `getUser()` returns 401. Verified on a local production build
+  (`next start`, 2026-11-25): GET/POST/PATCH/DELETE on `/api/todos` and `/api/todos/<id>` → 307, 0-byte body, no
+  `Set-Cookie` without cookies; followed → 401 `unauthorized`. With a forged `sb-*-auth-token` cookie the 307 carries
+  only the proxy's session-refresh **deletion** (`sb-127-auth-token=; Max-Age=0`), which is the correct response to an
+  invalid cookie, not a leak.
+- (b) Rejected: `experimental.validateRSCRequestHeaders: false` is app-wide and removes Next's guard against CDN cache
+  poisoning (an RSC payload cached under the HTML URL or the reverse). It trades a real protection for a test status
+  code, and it is an experimental flag that can change between Next versions.
+- (c) Rejected: the proxy answering `/api/*` requests carrying `rsc` makes the proxy a responder on the auth path,
+  against 3.3/3.4 ("the proxy does no authorization"), and copies a framework rule into our code that breaks silently
+  when Next changes how it detects RSC requests.
+
+Re-open this decision if: any to-do handler ever returns data or writes on a request that skipped `getUser()`; the
+307 ever carries a body, a `Location` on another origin, or a `Set-Cookie` with a non-empty session value; or the
+app moves behind a CDN (then the CDN must keep `_rsc` in the cache key and forward `rsc`, per the cdn-caching guide).
+
+**Exact assertion for qa-test (T1, `rsc: 1`, API only; the page case of T1 is unchanged).** For each of list
+(GET `/api/todos`), create (POST `/api/todos`), read/change/delete (GET/PATCH/DELETE `/api/todos/<A's existing id>`),
+with no session cookie, `rsc: 1`, plus `Origin: <app origin>` and `Content-Type: application/json` and a valid body
+on POST/PATCH (so the only reason to refuse is the missing session):
+1. Snapshot A's rows as `postgres` (count and `id, title, done, updated_at`).
+2. Request with redirects **not** followed (`maxRedirects: 0` / `redirect: "manual"`): status **307**; `Location`
+   equals the request path plus `?_rsc` (optionally `=<value>`), relative or on the app origin, never another host;
+   body is empty (0 bytes, in particular no `"title"`, no A's id, no RSC payload); no `Set-Cookie` header at all.
+3. Send the same method, headers and body to the `Location` URL (resolved against the app origin): status **401**,
+   body exactly the API's unauthorized error (`{"error":{"code":"unauthorized",...}}`), no to-do fields, no A's id;
+   no `Set-Cookie` that sets a non-empty `sb-*` value.
+4. A's rows as `postgres` equal the snapshot from step 1 (no insert, update or delete).
+Any other first status (200, 2xx, 4xx other than via this redirect, 5xx) fails the test. Also run step 2 once with a
+forged `sb-<ref>-auth-token` cookie: any `Set-Cookie` on the 307 may only delete (`Max-Age=0` or an expired date,
+empty value); a non-empty `sb-*` value fails.
 
 ### 3.6 Sign-out (AC8 decision)
 
@@ -487,6 +541,8 @@ No changes needed. If schema.md changes after this date, security re-checks this
 - `proxy.ts` (not `middleware.ts`), function `proxy`, matcher exactly as 6.4, no `runtime` export. It does: nonce (6.2)
   → CSP via `lib/server/csp.ts` (6.3) on request and response → Supabase SSR session refresh with `getClaims()` →
   returns the last `setAll` response carrying the CSP header, cookies, and cache headers. It does **not** authorize.
+  Its only header edit besides nonce/CSP: delete `x-middleware-prefetch` from the forwarded request for `/api` and
+  `/api/*` only (3.7). It never answers `rsc` requests itself (3.7, option (c) rejected).
 - Every to-do entry point: Origin check + content type (5) → `getUser()` (3.3) → zod strict (row 5) → query with the
   user's server client (anon key + cookies, RLS on) → 404 for 0 rows. No service role. No identity from headers.
 - Sign-out per 3.6. No auth verify endpoint of your own (4.3).
@@ -509,6 +565,8 @@ No changes needed. If schema.md changes after this date, security re-checks this
 
 **qa-test**
 - Tests T1-T6, C1-C5, N1-N6 above, in addition to the brief's ACs; map them in `specs/3/test-plan.md`.
+- T1 `rsc: 1` on the API: use the exact 307 → 401 assertion in 3.7 (documented exception; AC21 is read with it).
+  T1 `x-middleware-prefetch: 1` stays 401.
 - AC8: assert app API 401 and refresh-token failure after sign-out; do **not** assert direct-PostgREST behavior (3.6).
 - AC31 stays non-proof (L21). Keep live auth tests under the local limits even though the local stack doesn't enforce
   them (production will).
