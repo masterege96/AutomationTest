@@ -4,7 +4,8 @@
 # No task may leave BACKLOG until this exits 0. Run from the repo root.
 #
 # Usage:
-#   scripts/bootstrap-check.sh            # full check (needs `gh` signed in for branch protection)
+#   scripts/bootstrap-check.sh            # full check (needs `gh` signed in: branch protection, production
+#                                         # Environment and repo secret names, all read-only GET requests)
 #   scripts/bootstrap-check.sh --offline  # skips the GitHub API checks (reported as SKIP, never PASS)
 #
 # Exit codes: 0 = all checks pass, 1 = at least one check failed.
@@ -73,6 +74,69 @@ else
     echo "$PROT" | grep -q '"required_status_checks"' \
       && ok "main requires status checks" || bad "main requires status checks" "enable 'Require status checks to pass' and select the verify and db-check jobs"
   fi
+fi
+
+# S19: production credentials live only in the main-only `production` Environment.
+# Read-only GET requests; the secrets API returns names only, never values.
+ENV_NAME="GitHub Environment production exists"
+POL_NAME="production deploys only from main (deployment branch policy)"
+SEC_NAME="no repository-level SUPABASE_* secrets"
+ENV_FIX="Settings > Environments: create production, deployment branches: selected branches, main only"
+POL_FIX="Settings > Environments > production > Deployment branches: 'Selected branches and tags' with exactly one branch rule: main (not 'Protected branches only')"
+if [ "$OFFLINE" = 1 ]; then
+  skip "production environment and repo secrets (offline mode: CI must run the full check)"
+elif ! command -v gh >/dev/null 2>&1 || ! gh auth status >/dev/null 2>&1; then
+  bad "production environment and repo secrets (gh CLI missing or not signed in, so they can't be verified)" "install gh and run gh auth login, or run with --offline locally"
+else
+  GH_ERR=$(mktemp "${TMPDIR:-/tmp}/bootstrap-gh.XXXXXX"); GH_OUT=$(mktemp "${TMPDIR:-/tmp}/bootstrap-gh.XXXXXX")
+  # gh_get <path> [extra gh args]: sets GH_BODY (whitespace removed); on failure sets GH_CODE
+  # (HTTP code from gh's stderr, or empty) and returns 1. Runs in this shell (no subshell).
+  gh_get() {
+    local p="$1"; shift
+    GH_CODE=""; GH_BODY=""
+    if gh api --method GET "$@" "$p" >"$GH_OUT" 2>"$GH_ERR"; then GH_BODY=$(tr -d '[:space:]' <"$GH_OUT"); return 0; fi
+    GH_CODE=$(grep -oE 'HTTP [0-9]{3}' "$GH_ERR" | tail -1 | cut -d' ' -f2)
+    return 1
+  }
+  unreadable() { [ -n "$GH_CODE" ] && echo "(could not read: HTTP $GH_CODE)" || echo "(could not read: gh api failed)"; }
+
+  gh_get "repos/{owner}/{repo}/environments/production"; ENV_RC=$?; ENV_JSON="$GH_BODY"
+  if [ "$ENV_RC" = 0 ] && [ -n "$ENV_JSON" ]; then
+    ok "$ENV_NAME"
+    if echo "$ENV_JSON" | grep -q '"deployment_branch_policy":null' || ! echo "$ENV_JSON" | grep -q '"deployment_branch_policy":'; then
+      bad "$POL_NAME" "$POL_FIX (now: all branches)"
+    elif echo "$ENV_JSON" | grep -q '"protected_branches":true'; then
+      bad "$POL_NAME" "$POL_FIX (now: protected branches)"
+    elif ! echo "$ENV_JSON" | grep -q '"custom_branch_policies":true'; then
+      bad "$POL_NAME" "$POL_FIX"
+    elif ! gh_get "repos/{owner}/{repo}/environments/production/deployment-branch-policies?per_page=100"; then
+      bad "$POL_NAME $(unreadable)" "$POL_FIX"
+    else
+      POL_JSON="$GH_BODY"
+      # Each policy object carries "name" and "type"; exactly one, the branch rule main.
+      POL_COUNT=$(echo "$POL_JSON" | grep -oE '"name":"[^"]*"' | wc -l | tr -d ' ')
+      if [ "$POL_COUNT" = 1 ] && echo "$POL_JSON" | grep -q '"name":"main"' && echo "$POL_JSON" | grep -q '"type":"branch"'; then
+        ok "$POL_NAME"
+      else
+        bad "$POL_NAME" "$POL_FIX (now: $POL_COUNT rule(s), not exactly the branch main)"
+      fi
+    fi
+  elif [ "$ENV_RC" != 0 ] && [ "$GH_CODE" = 404 ]; then
+    bad "$ENV_NAME" "$ENV_FIX"
+    bad "$POL_NAME" "$POL_FIX"
+  else
+    bad "$ENV_NAME $(unreadable)" "check that gh can read the repository's environments"
+    bad "$POL_NAME $(unreadable)" "$POL_FIX"
+  fi
+
+  if gh_get "repos/{owner}/{repo}/actions/secrets?per_page=100" --paginate; then
+    FOUND=$(printf '%s' "$GH_BODY" | grep -oE '"name":"SUPABASE_[^"]*"' | sed -E 's/^"name":"(.*)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
+    if [ -z "$FOUND" ]; then ok "$SEC_NAME"
+    else bad "$SEC_NAME (found: $FOUND)" "move it to the production Environment (Settings > Environments > production > Environment secrets) and delete the repository secret"; fi
+  else
+    bad "$SEC_NAME $(unreadable)" "gh needs read access to the repository's Actions secrets (names only)"
+  fi
+  rm -f "$GH_ERR" "$GH_OUT"
 fi
 
 # ---------- CI/CD ----------
