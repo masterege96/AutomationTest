@@ -2,7 +2,8 @@ Result: PASS
 
 # Task 2b security gate: security headers + local/CI auth defaults
 
-Author: security (Gate), 2026-11-25; re-gated after the main merge (HEAD `fc61959`), see the last section. Fresh
+Author: security (Gate), 2026-11-25; re-gated after the main merge (HEAD `fc61959`) and again after the second main
+merge (HEAD `329abd7`), see the last two sections. Fresh
 context, judged from the repo only. Branch `sec/2b-headers-auth-defaults`,
 diff `git diff origin/main...HEAD` (origin/main fetched first). No Supabase cloud or production access was used.
 
@@ -157,5 +158,33 @@ after the first gate (`4e4be4a`) and the code review (`7e510e5`, APPROVE). Check
   removed or weakened, so it doesn't change this task's security evidence. verify.sh still runs all secret, RLS, XSS,
   scope and bundle checks.
 - `npm test` 44/44; `verify.sh: PASS 18/18 (1 skipped)` (test:e2e, no script); `npm audit` 0 vulnerabilities.
+
+Result unchanged: PASS, with P1 (checklist item 22) required post-deploy.
+
+## Re-gate after second main merge (329abd7)
+
+Trigger: after the previous gate (`09c8f19`, PASS) and the code review (`a2db9fd`, APPROVE), the orchestrator merged
+origin/main again (`329abd7`; brought PR #10 = task 2a: migration `20261125150215_function_privileges.sql`, pgTAP test
+`supabase/tests/02_function_privileges_test.sql`, `specs/2a/**`, tasks docs) and added lesson L23. Fresh context;
+checked at HEAD `329abd7`, origin/main (`9f742a9`) fetched and an ancestor of HEAD:
+
+- `git diff 09c8f19 HEAD -- next.config.ts supabase/config.toml tests/` is empty: code, config and tests are byte for
+  byte what the earlier gates judged. All row results above stand.
+- `git diff origin/main...HEAD` still touches only `next.config.ts`, `supabase/config.toml`, `tests/integration/**`
+  (2 files), `specs/2b/**` and `tasks/**` (2b brief, board, lessons). Task 2a's files are on main, so they are not in
+  this PR's net diff. verify.sh scope check PASS.
+- No conflict markers in the tree (`git grep` for `<<<<<<<` / `>>>>>>>` / `|||||||` at line start: none).
+- `tasks/2b/TASK_BRIEF.md` is unchanged since `09c8f19`, so checklist item 22 (= P1) still stands as checked above.
+- Task 2a's migration only changes default privileges: `ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" REVOKE EXECUTE ON
+  FUNCTIONS FROM PUBLIC / anon / authenticated` for functions created later. It creates no objects and touches no data.
+  2b creates no functions or DB objects; it changes HTTP headers (`next.config.ts`) and auth server settings
+  (`supabase/config.toml`, read by GoTrue, not by SQL). The auth server's own functions belong to `supabase_auth_admin`,
+  not `postgres`, so the revoke doesn't reach them. No interaction with rows 9, 11, 3 or 13; the 2a change tightens the
+  database and weakens nothing 2b relies on. `supabase test db` (now including 2a's pgTAP test) passes.
+- `tasks/decisions.md` gained the person's task-2 decision row (Q1-Q4), consistent with this gate (Q3 = fixed CSP now,
+  nonce CSP in task 3; Q4 = CAPTCHA off locally and in CI, Turnstile on the production checklist).
+- Lesson L23 (shared board/lessons files keep conflicting) is process only; L21 and L22 references above unchanged.
+- `npm test` 44/44; `verify.sh: PASS 18/18 (1 skipped)` (test:e2e, no script; with DB, under the shared lock);
+  `npm audit --audit-level=high` 0 vulnerabilities. No secret printed during this gate.
 
 Result unchanged: PASS, with P1 (checklist item 22) required post-deploy.
