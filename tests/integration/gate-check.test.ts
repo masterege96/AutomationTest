@@ -676,6 +676,117 @@ describe("gate-check.sh label freshness (task 4b AC17-AC22: S16)", () => {
   });
 });
 
+// Security gate round 1, F1 (HIGH): the old "tip contains C" rule let a reverted protected change come back after the
+// label (reset + force push, or a fast-forward "ours" merge) and still PASS. Fixed in 4982db9 (Q1 rule 2 amended:
+// the label must postdate the last push that CHANGED the net protected diff). Fixture steps are the ones in the
+// "devops-cicd, 2026-11-25 (F1 fix)" Handoff entry.
+const P00 = "2026-11-25T10:00:00Z";
+const P05 = "2026-11-25T10:05:00Z";
+const P10 = "2026-11-25T10:10:00Z";
+const P15 = "2026-11-25T10:15:00Z";
+const P20 = "2026-11-25T10:20:00Z";
+const P25 = "2026-11-25T10:25:00Z";
+
+// Q: scripts/x.sh changed; P: scripts/evil.sh added; gates -> GS; revert P; gates -> GS2 (net protected = x.sh only).
+function f1Repo(): { r: Repo; gs: string; gs2: string } {
+  const r = new Repo({ "scripts/x.sh": "echo x\n", "app/a.ts": "export const a = 1;\n" });
+  r.checkout(["-b", BRANCH]);
+  r.commit("ci: Q", { "scripts/x.sh": "echo x2\n" });
+  const p = r.commit("ci: P", { "scripts/evil.sh": "echo evil\n" });
+  const gs = r.gates("GS");
+  r.git(["revert", "--no-edit", p]);
+  expect(r.git(["ls-files", "scripts/evil.sh"])).toBe("");
+  const gs2 = r.gates("GS2");
+  return { r, gs, gs2 };
+}
+const headArgs = (sha: string) => ["--base", "main", "--head", sha, "--branch", BRANCH];
+// From GS2: a non-protected commit (app/b.ts) and gates -> H (same net protected change as GS2).
+function addH(r: Repo): string {
+  r.commit("feat: b", { "app/b.ts": "export const b = 1;\n" });
+  return r.gates("H");
+}
+
+describe("gate-check.sh F1 regression: label vs. the last push that changed the net protected diff (AC18 family)", () => {
+  it("F1 legit: label after the GS2 push -> PASS line names the push (tip GS2 at 10:00)", { timeout: TIMEOUT }, () => {
+    const { r, gs2 } = f1Repo();
+    const res = r.run(label(P05, pushes([P00, gs2])), headArgs(gs2));
+    const i = expectLine(res, LABEL_PASS);
+    expect(res.lines[i], res.out).toContain(`tip ${gs2} at ${P00}`);
+    expectPass(res);
+  });
+
+  it("F1 variant A: reset to GS and force push after the label -> label-older FAIL listing scripts/evil.sh; re-label -> PASS", { timeout: TIMEOUT }, () => {
+    const { r, gs, gs2 } = f1Repo();
+    const p = pushes([P00, gs2], [P10, gs]);
+    const res = r.run(label(P05, p), headArgs(gs));
+    const i = expectLine(res, LABEL_OLD);
+    expect(res.lines[i], res.out).toContain(`tip ${gs} at ${P10}`);
+    expectListed(res, LABEL_OLD, "scripts/evil.sh");
+    expectNoLine(res, LABEL_PASS);
+    expectFail(res);
+
+    const relabel = r.run(label(P15, p), headArgs(gs));
+    expect(relabel.lines[expectLine(relabel, LABEL_PASS)]).toContain(`tip ${gs} at ${P10}`);
+    expectPass(relabel);
+  });
+
+  it("F1 variant B: fast-forward merge commit with GS's tree after the label -> label-older FAIL listing scripts/evil.sh; re-label -> PASS", { timeout: TIMEOUT }, () => {
+    const { r, gs, gs2 } = f1Repo();
+    const m = r.git(["commit-tree", `${gs}^{tree}`, "-p", gs, "-p", gs2, "-m", "merge"]);
+    expect(r.git(["merge-base", "--is-ancestor", gs2, m]) === "").toBe(true); // a fast-forward of the labeled tip
+    const p = pushes([P00, gs2], [P10, m]);
+    const res = r.run(label(P05, p), headArgs(m));
+    const i = expectLine(res, LABEL_OLD);
+    expect(res.lines[i], res.out).toContain(`tip ${m} at ${P10}`);
+    expectListed(res, LABEL_OLD, "scripts/evil.sh");
+    expectNoLine(res, LABEL_PASS);
+    expectFail(res);
+
+    const relabel = r.run(label(P15, p), headArgs(m));
+    expectLine(relabel, LABEL_PASS);
+    expectPass(relabel);
+  });
+
+  it("F1 intermediate differing push (GS2, GS, H): label must postdate the return push", { timeout: TIMEOUT }, () => {
+    const { r, gs, gs2 } = f1Repo();
+    const h = addH(r);
+    const p = pushes([P00, gs2], [P10, gs], [P20, h]);
+    const early = r.run(label(P05, p), headArgs(h));
+    expect(early.lines[expectLine(early, LABEL_OLD)], early.out).toContain(`tip ${h} at ${P20}`);
+    expectListed(early, LABEL_OLD, "scripts/x.sh");
+    expectFail(early);
+
+    const late = r.run(label(P25, p), headArgs(h));
+    expect(late.lines[expectLine(late, LABEL_PASS)], late.out).toContain(`tip ${h} at ${P20}`);
+    expectPass(late);
+  });
+
+  it("F1 unknown tip pushed in between -> counts as a different push: label-older FAIL", { timeout: TIMEOUT }, () => {
+    const { r, gs2 } = f1Repo();
+    const h = addH(r);
+    const unknown = "0123456789abcdef0123456789abcdef01234567";
+    expect(r.gitStatus(["cat-file", "-e", `${unknown}^{commit}`])).not.toBe(0);
+    const res = r.run(label(P05, pushes([P00, gs2], [P10, unknown], [P20, h])), headArgs(h));
+    expect(res.lines[expectLine(res, LABEL_OLD)], res.out).toContain(`tip ${h} at ${P20}`);
+    expectFail(res);
+  });
+
+  it.each(["H first", "GS first"])(
+    "F1 same-second tie of a same and a different push (%s) -> push time could not be read, exit 1",
+    { timeout: TIMEOUT },
+    (order) => {
+      const { r, gs, gs2 } = f1Repo();
+      const h = addH(r);
+      const tie: [string, string][] = order === "H first" ? [[P10, h], [P10, gs]] : [[P10, gs], [P10, h]];
+      const res = r.run(label(P15, pushes([P00, gs2], ...tie)), headArgs(h));
+      const i = expectLine(res, PUSH_TIME_BAD);
+      expect(res.lines[i], res.out).toContain("no push later than the last push with a different protected change");
+      expectNoLine(res, LABEL_PASS);
+      expectFail(res);
+    },
+  );
+});
+
 // ---------- gate.yml static checks (AC23, AC24) ----------
 
 const GATE_YML = readFileSync(join(ROOT, ".github", "workflows", "gate.yml"), "utf8").replace(/\r\n/g, "\n");
