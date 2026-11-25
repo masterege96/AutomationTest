@@ -79,9 +79,9 @@ path may belong to two roles.
 | `NEXT_PUBLIC_SUPABASE_URL` | client | hosting provider |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | client | hosting provider |
 | `SUPABASE_SERVICE_ROLE_KEY` | **server only** | hosting provider, GitHub Secrets |
-| `SUPABASE_ACCESS_TOKEN` | CI only (drift check) | GitHub Secrets (not added yet) |
-| `SUPABASE_DB_PASSWORD` | CI only (drift check) | GitHub Secrets (not added yet) |
-| `SUPABASE_PROJECT_ID` | CI only (drift check) | GitHub Secrets or variable (not added yet) |
+| `SUPABASE_ACCESS_TOKEN` | CI only (drift check) | GitHub Environment `production` secret (main only) |
+| `SUPABASE_DB_PASSWORD` | CI only (drift check) | GitHub Environment `production` secret (main only) |
+| `SUPABASE_PROJECT_ID` | CI only (drift check) | GitHub Environment `production` secret (main only) |
 
 ## Security baseline: rows that don't apply
 
@@ -101,6 +101,6 @@ with login). **security** must confirm in the first threat model.
 
 ## Hard constraints
 
-- No Supabase cloud project, GitHub integration or secrets until the person decides (Phase 0 stop).
+- The Supabase project AutomationTests and its GitHub integration were connected by the person on 2026-11-25. Agents never write to production (AGENT_RULES §4); every merge to `main` deploys migrations, so open merge-gate risks (tasks/lessons.md L11) need the person's decision before the first real table.
 - No new paid services, tools or major dependencies without the person's approval.
 - Production changes only via migrations merged to `main` and applied by automation.

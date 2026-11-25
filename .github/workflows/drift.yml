@@ -76,7 +76,8 @@ jobs:
           # Judge on content: anything other than blank lines and SQL comments is drift.
           CHANGED_LINES=$(grep -cvE '^[[:space:]]*(--.*)?$' diff.sql || true)
           echo "diff: $CHANGED_LINES non-comment lines, sha256 $(sha256sum diff.sql | cut -c1-12)"
-          if [ "$CHANGED_LINES" -gt 0 ]; then
+          # Pass only on an exact "0"; anything else (non-empty diff, odd output) is treated as drift (fails closed).
+          if [ "$CHANGED_LINES" != "0" ]; then
             echo "drift=yes" >> "$GITHUB_OUTPUT"
             echo "::error::Drift: production differs from supabase/migrations"
             exit 1

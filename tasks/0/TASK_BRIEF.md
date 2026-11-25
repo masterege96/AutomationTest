@@ -17,7 +17,7 @@ can gate every later task. No app features.
 
 - [ ] AC1: `.gitattributes` (`* text=auto eol=lf`) and `.gitignore` (`.env*`, `!.env.example`) are the first commit.
 - [ ] AC2: Next.js + TypeScript (App Router) scaffold and `supabase init` are committed; framework `scripts/`, `rules/`, `roles/`, `templates/`, `ORCHESTRATOR.md` are copied in.
-- [ ] AC3: `PROJECT_CONTEXT.md` is filled in (hosting type Supabase-hosted; "Deploy path" line left as in the template).
+- [ ] AC3: `PROJECT_CONTEXT.md` is filled in (hosting type Supabase-hosted; "Deploy path" set to `Supabase GitHub integration` once the person connected it, 2026-11-25).
 - [ ] AC4: Versions pinned: `.nvmrc`, `engines`, `packageManager`, exact Supabase CLI devDependency, committed lockfile; npm scripts `typecheck`, `lint`, `test`, `build`.
 - [ ] AC5: `.github/pull_request_template.md`, `CHANGELOG.md` (0.1.0), `ci.yml` (`verify`, `db-check`, `secrets`), `gate.yml` (`merge-gate`, `pull_request_target` from main) and `drift.yml` (nightly, read-only, `environment: production`) exist; every action and tool version pinned. (Updated 2026-11-25 after the L10 decision.)
 - [ ] AC6: First migration (`init`, no schema changes) and a first pgTAP test in `supabase/tests`.
@@ -97,5 +97,5 @@ supabase/tests/*
 
 ## Blocked (fill in only when BLOCKED)
 
-- **Missing (all from the person):** (1) deploy path: Supabase cloud project + GitHub integration; (2) GitHub Environment `production` restricted to `main`, holding `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`, then one green drift run; (3) branch protection: required check `merge-gate`, bypass not allowed; (4) the `framework-change-approved` label on PR #2.
+- **Missing:** (1) done by the person 2026-11-25: Supabase project AutomationTests + GitHub integration, `production` environment with the drift secrets; (2) one green drift run on main (git-release, after PR #2 merges); (3) the person: branch protection required check `merge-gate`, bypass not allowed; (4) the person: `framework-change-approved` label on PR #2; (5) the person: decide the open merge-gate risks in tasks/lessons.md L11 before the first real table.
 - **Who must provide it:** the person
