@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | VERIFYING (the person: dashboard items 1-21, item 22 before any real user) |
 | Owner role | devops-cicd (`next.config.*` headers block, `supabase/config.toml`, production dashboard checklist); qa-test (`tests/integration/**`, `specs/2b/test-plan.md`) |
 | Branch | `sec/2b-headers-auth-defaults` |
 | Worktree | `../wt-2b-devops-cicd` |

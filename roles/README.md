@@ -25,6 +25,8 @@ Each path has exactly one owner. Override paths in `PROJECT_CONTEXT.md`
 | Path | Owner |
 |------|-------|
 | `tasks/<id>/TASK_BRIEF.md` (goal, acceptance criteria, scope) | product-spec (every role appends to Handoff) |
+| `tasks/<id>/lessons.md` | every role working on task `<id>` (entries only added, or their status changed) |
+| `tasks/decisions/*` | the role that recorded the person's decision (never edited after merge) |
 | `specs/<id>/schema.md` | db-architect |
 | `specs/<id>/threat-model.md`, `specs/<id>/security-gate.md`, `.gitleaks.toml` | security |
 | `specs/<id>/test-plan.md` | qa-test |

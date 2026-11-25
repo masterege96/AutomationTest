@@ -1,4 +1,5 @@
 # Decisions
+Archive, frozen since task 4a (2026-11-25): `frozen; new entries go to tasks/decisions/` (one file each, `<YYYY-MM-DD>-<task-id>-<slug>.md`; example `tasks/decisions/2026-11-25-4a-step-4-go-ahead.md`).
 
 Decisions the person made. Newest last.
 

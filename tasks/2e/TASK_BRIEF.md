@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | DONE |
 | Owner role | git-release |
 | Branch | `chore/2e-2a-close-out` |
 | Worktree | `../wt-2e-git-release` |

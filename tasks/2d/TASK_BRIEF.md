@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | DONE |
 | Owner role | git-release |
 | Branch | `chore/2d-post-deploy-records` |
 | Worktree | `../wt-2d-git-release` |
