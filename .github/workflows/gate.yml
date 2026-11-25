@@ -28,6 +28,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # No credentials: this works because the repo is public. If it goes private this step fails
+      # (safe: the gate stays red); then add a read-only token for the fetch only, never run PR code.
       - name: Fetch PR head (read only) and pin it to the reported SHA
         env:
           PR: ${{ github.event.pull_request.number }}

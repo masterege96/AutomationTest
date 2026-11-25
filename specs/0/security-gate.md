@@ -1,98 +1,65 @@
 Result: PASS
 
-# Security gate: task 0, PR #2 (gate hardening), pass 3
+# Security gate: task 0, PR #3 (gate cleanup)
 
 - **Reviewer:** security (fresh context, no builder conversation; judged from the repo only)
 - **Date:** 2026-11-25
-- **Branch / HEAD reviewed:** `ci/0-gate-hardening` @ `09a0f56`, diff `git diff origin/main...HEAD` (16 files)
-- **Previous gate:** `7390bbd` (PASS, reviewed `157efb0`). This pass re-runs the gate because `09a0f56` changed code after it.
+- **Branch / HEAD reviewed:** `ci/0-gate-cleanup` @ `ece4704`, diff `git diff origin/main...HEAD` (1 commit, 7 files, +29/-28)
 
-## Scope of change since the last gate
+## Scope of change
 
-`git diff 7390bbd HEAD --stat` lists exactly the 4 files of `09a0f56` (`drift.yml`, `PROJECT_CONTEXT.md`,
-`tasks/0/TASK_BRIEF.md`, `tasks/decisions.md`, +9/-7), and `7390bbd` itself only touched this file. So
-the rest of the PR diff is byte-identical to what `7390bbd` reviewed, and its evidence for
-`gate.yml`, `gate-check.sh`, `verify.sh` and `ci.yml` still holds. This pass re-checks `09a0f56` in full.
+| File | Change | Executable change? |
+|---|---|---|
+| `.github/workflows/ci.yml` | Removes the temporary in-PR `gate` job (it ran the PR's own `gate-check.sh`); header comment updated | Yes: job removal only |
+| `.github/workflows/gate.yml` | +2 comment lines (fetch step works without credentials because the repo is public; going private fails closed) | No (every `+`/`-` line is a `#` comment) |
+| `scripts/gate-check.sh` | Header comment rewritten to describe current behaviour | No (every `+`/`-` line is a `#` comment) |
+| `roles/devops-cicd.md` | Doc fix: `merge-gate` passes `--head "$HEAD_SHA"` | No |
+| `tasks/0/TASK_BRIEF.md` | Branch field lists the PR branches | No |
+| `tasks/decisions.md` | S14 accepted for the pilot | No |
+| `tasks/lessons.md` | L11 S14 marked accepted; new L12 (drift link failure) | No |
+
+Check: `git diff origin/main...HEAD -U0 -- gate.yml gate-check.sh`, filtered for `+`/`-` lines that are not `#` comments: none.
+The new gate-check.sh comment matches the code (first non-empty line rule at `gate-check.sh:40-43`,
+no merge-base = FAIL at `:50-52`, protected paths and `FRAMEWORK_CHANGE_APPROVED` at `:67-69`).
+No `package.json`, lockfile or `supabase/` change.
 
 ## Applicable baseline rows
 
-Row 13 (brief), plus the merge-approval control (ORCHESTRATOR 3a) and the drift check this PR
-changes. Rows 1-12 and 14: nothing new (no app code, routes, tables or migrations).
+Row 13 (secrets) and the merge-approval control (ORCHESTRATOR 3a). Rows 1-12 and 14: not applicable
+(no app code, routes, tables, migrations or dependencies).
 
-### Row 13: `.env` in Git / no secrets in files
+### Merge-approval control
 
-| Control | Where | Proof | Result |
-|---|---|---|---|
-| verify.sh secret checks | `scripts/verify.sh` | "no .env files tracked", "basic secret pattern scan" PASS (gitleaks not installed locally; fallback scan). Unchanged since `7390bbd`. | PASS |
-| CI secret scan | `ci.yml` `secrets` job | unchanged | PASS |
-| No project ref, key or password in any file | whole tree at HEAD | `git grep` at HEAD for `<20-char ref>.supabase.co`, JWTs (`eyJ…`), `sb_secret_`/`sb_publishable_`, `postgres://user:pass@`, literal `SUPABASE_DB_PASSWORD=`: no hits. `09a0f56` adds only the project name (AutomationTests), the region (Europe) and the environment name `production`. No 20-char lowercase ref string in `PROJECT_CONTEXT.md`, `tasks/` or `specs/`. | PASS |
-
-### Drift check (`drift.yml`, changed in `09a0f56`)
-
-| Check | Where | Proof | Result |
-|---|---|---|---|
-| S22: fails closed on a non-numeric count | `drift.yml:77-86` | The test is now `[ "$CHANGED_LINES" != "0" ]`, so only an exact `0` passes. Step logic copied into a scratch script (run under `bash -e`, as Actions does): empty diff: `drift=no`, exit 0. Comments, blank lines and CRLF only: `0`, pass. One SQL line: `drift=yes`, exit 1. Missing `diff.sql` (grep exit 2, empty output): exit 1. Non-numeric output `abc`, blank output, `" 0"`: all exit 1. `grep -c` prints `0` and exits 1 on no match, and `|| true` keeps the `0`, so the clean case still passes. | PASS (S22 closed) |
-| Nothing new in the public log | `drift.yml:72-78`, `:94-95` | Unchanged by `09a0f56` apart from the `if` and a comment. The log still gets only a count and a 12-hex sha256. On odd output the count line echoes the odd value; it comes from `grep -c` on the diff file, so it is a number or empty, never diff content. Issue body still has no diff. | PASS |
-| Secrets scoping | `drift.yml:24`, `:35-69` | unchanged: `environment: production`, secrets only on the link and diff steps, `persist-credentials: false`. | PASS |
-
-### Merge-approval control (`gate.yml` + `gate-check.sh`)
-
-Unchanged since `7390bbd`; its proofs (F1 closed: `--base origin/main` hard-coded, non-`main` bases exit,
-`edited` trigger; S17 head-SHA pin; concurrency; PR code never executed) carry forward.
-
-### S25: documentation consistency (changed in `09a0f56`)
-
-| Check | Where | Result |
+| Check | Proof | Result |
 |---|---|---|
-| Hard constraint no longer says "no cloud project until the person decides" | `PROJECT_CONTEXT.md:104` | Now states the person connected the project and integration on 2026-11-25, that agents never write to production, and that L11 risks need a decision before the first real table. PASS |
-| Secrets table | `PROJECT_CONTEXT.md:82-84` | Drift secrets listed as `production` environment secrets (main only), consistent with `tasks/decisions.md` and `drift.yml:24`. PASS |
-| AC3 and Blocked | `tasks/0/TASK_BRIEF.md:20`, `:100` | AC3 records the deploy path; Blocked (1) marked done by the person; remaining items (green drift run, branch protection, label, L11 decision) listed. PASS |
-| Decision recorded | `tasks/decisions.md:11` | New row: project created, integration connected, drift secrets stored, by the person. PASS |
+| Removing `gate` doesn't weaken approval | The removed job ran the PR head's own `gate-check.sh` (a PR could edit it), so it was the weaker control. Approval is the required `merge-gate` in `gate.yml` (`pull_request_target`, script from `main`), unchanged except for comments. ORCHESTRATOR 3a lists required checks `verify`, `db-check`, `secrets`, `merge-gate`; `gate` is not among them. | PASS |
+| Workflows parse, required job names unchanged | js-yaml parse of all `.github/workflows/*.yml`: `ci.yml` jobs `verify=verify, db-check=db-check, secrets=secrets`; `gate.yml` `merge-gate=merge-gate`; `drift.yml` `drift=drift`. No remaining `needs:` on `gate`. | PASS |
+| S14 acceptance recorded as the person's decision | `tasks/decisions.md` row 2026-11-25, decided by "the person (via the coordinator)", same form as the other entries; fix planned (plan step 4, GitHub App check). L11 cross-references it. | PASS |
 
-S25 is closed. Two small doc leftovers are listed as S27 below.
+### Row 13: no secrets in files
 
-## Automated results (local, HEAD `09a0f56`)
+| Check | Proof | Result |
+|---|---|---|
+| Diff contains no secret, project ref or connection string | Diff grep for 20-char lowercase strings, `postgres(ql)://`, `eyJ`, `sb_secret`, `sbp_`, `service_role`, `password`: no hits. L12 describes the ref format (`^[a-z]{20}$`, "20-character reference ID") and the masked CLI error (`***`) only; no value. | PASS |
+| Whole tree at HEAD | `git grep` for `<20-char>.supabase.co`, JWTs, `sb_secret_`, `sbp_`, `postgres://user:pass@` (excluding local `postgres:postgres@127.0.0.1`): only hit is the previous gate file's own description of these patterns (replaced by this file). | PASS |
+| verify.sh | `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md`: **PASS 18/18 (1 skipped: no e2e script)**, incl. scope, no `.env` tracked, secret pattern scan (gitleaks not installed locally; CI `secrets` job runs it on full history), migrations apply, `supabase test db`, SQL lint. | PASS |
+| npm audit | `npm audit --audit-level=high`: 0 vulnerabilities. | PASS |
 
-| Check | Result |
-|---|---|
-| `npm audit --audit-level=high` | `found 0 vulnerabilities` |
-| `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker) | `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script) |
-| Supabase security advisors | Not run: agents don't touch the cloud project in this task, and the PR adds no schema |
-| RLS check | verify.sh static check PASS, `supabase test db` PASS (no tables) |
+Supabase security advisors: not run (no database change in this PR; cloud not touched).
 
-## Findings
+## Notes for the person (not blocking)
 
-### FAIL-worthy
+- If branch protection on `main` still lists `gate` as a required check, remove it: with the job gone, PRs
+  would wait on it forever (fails closed), and a PR could add its own job named `gate` to satisfy it
+  (harmless while `merge-gate` is also required). Not checked here: GitHub settings are out of scope.
+- `gate.yml` fetch relies on the repo being public (new comment). Going private makes the gate red, not open.
 
-None. F1 stays closed (see `7390bbd`). `09a0f56` adds no exploitable hole and no secret.
+## Carried forward (known, not introduced by this PR)
 
-### Should-fix (carried from `7390bbd` unless marked new)
-
-| # | File:line | Severity | Problem (short; full text in `7390bbd`) | Fix | Owner |
-|---|---|---|---|---|---|
-| S14 (open, now more urgent) | `gate.yml`, branch protection, `tasks/lessons.md` L11 | High (pre-existing) | Check-name spoofing: any Actions job named `merge-gate` reports under the same check. Two variants: a `pull_request` job in the PR head (in L11) and a spoof `gate.yml` on a pushed base branch, then retarget to `main` and re-run the old spoof run (not in L11; L11's suggested fix misses it). Not verified on GitHub. With the Supabase GitHub integration now connected, a merge to `main` applies migrations to production, so this is a path to a production write. | Partial: gate-check fails on other `merge-gate`/`gate` jobs in the head; restrict branch creation or check base history before merging. Full: a check source workflows can't imitate (GitHub App / required workflow). Add the base-branch variant to L11 and `ORCHESTRATOR.md:69-70`. The person decides before the first real table (as `PROJECT_CONTEXT.md:104` now says). | devops-cicd; the person |
-| S5 (open) | `gate-check.sh:51` | Medium (pre-existing) | A `tasks/**`-only PR (incl. `tasks/decisions.md`) passes with stale gate files. | As in L11. | devops-cicd |
-| S15 (open) | `gate-check.sh:64` | Medium (pre-existing) | Protected-path list misses `.gitleaks.toml`, rest of `.github/**`, `package.json`/lockfile, `supabase/config.toml`, `templates/`, `AGENTS.md`. Note `supabase/config.toml` and `supabase/migrations` now feed production directly. | Extend the pathspec. | devops-cicd |
-| S16 (open) | `gate-check.sh:66`, `gate.yml:44` | Medium (pre-existing) | Label not tied to a commit. | Re-add after each push, or record the approved SHA. | the person; devops-cicd |
-| S19 (open) | `drift.yml:24` | Medium (pre-existing) | Nothing checks the `production` environment's main-only policy or the absence of repo-level `SUPABASE_*` secrets. | bootstrap-check, read-only `gh api`. | devops-cicd |
-| S20/S21 (open) | `roles/git-release.md:19`, `ORCHESTRATOR.md:69` | Low | Ownership wording contradicts AGENT_RULES 18a; "can't edit the gate" overstates the control. | Reword. | the person |
-| S23 (accepted) | `drift.yml:74` | Low | `tail -20 diff.err` on CLI failure; derived values of secrets aren't masked. | Keep, or print the first error line only; re-check the first failing run. | devops-cicd |
-| S24 (info) | `drift.yml:78` | Info | 12-hex hash of a non-empty diff allows confirming a guessed diff. Negligible. | None. | none |
-| S26 (new, `09a0f56`) | `drift.yml:80-83`, `:89` | Low | Failing closed is correct, but an odd count (missing file, grep error) is reported as `drift=yes`, so the job opens a drift issue saying "production differs" and triggers stop rule 1 for what is really a broken check. | Optional: `case "$CHANGED_LINES" in ''|*[!0-9]*) echo "::error::could not count diff lines"; exit 1;; esac` before the drift test, so odd output fails without `drift=yes`. | devops-cicd |
-| S27 (new, `09a0f56`) | `drift.yml:9`, `tasks/lessons.md` L11 | Low (doc) | `drift.yml:9` still says to add a post-deploy `workflow_run` trigger "once the deploy path exists"; it exists now (the integration has no workflow to hook, so it stays nightly). L11 still lacks S14's base-branch variant. | Reword the comment; add the variant to L11. | devops-cicd |
-
-S22 and S25 (from `7390bbd`) are closed by `09a0f56`.
-
-### Temporary state (unchanged from `7390bbd`)
-
-Until this PR merges, the required check is the old `gate` job in `ci.yml`, which runs the PR's own
-`gate-check.sh` and proves nothing for this PR. The real control for PR #2 is the person reading the
-diff and adding `framework-change-approved`. After the merge: the person makes `merge-gate` required
-instead of `gate` with bypass off, and the follow-up PR removing the `gate` job merges under `merge-gate`.
-Since the integration is connected, merging this PR applies the `init` migration (no schema change)
-to production; that is expected and harmless.
-
-## Secret exposure
-
-None found. No secret values were read, used or printed. No Supabase cloud, GitHub settings or labels
-were touched, and nothing was pushed.
+- **S14** (accepted for the pilot, tasks/decisions.md): same-named `merge-gate` job from a PR, and the
+  base-retarget variant. Fix: GitHub App check (plan step 4). Decide before the first real table, since the
+  Supabase integration makes a spoofed merge a production write path.
+- Open from L11: S5 (`tasks/**`-only PRs with stale gates), S15 (protected-path list gaps), S16 (label not
+  tied to a commit), S19 (bootstrap check for `production` environment), S20/S21 (git-release role vs
+  AGENT_RULES 18a), S26 (drift non-numeric count), S27 (post-deploy drift trigger).
+- L12 (person): `SUPABASE_PROJECT_ID` environment secret holds a non-ref value; drift link fails until fixed.
