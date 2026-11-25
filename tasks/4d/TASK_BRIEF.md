@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | SPEC_READY |
+| State | IN_REVIEW |
 | Owner role | devops-cicd (build: `scripts/verify.sh`, `scripts/bootstrap-check.sh`, `roles/qa-test.md`); qa-test (tests: `tests/integration/**`, fixture dirs) |
 | Branch | `ci/4d-verify-fixes` |
 | Worktree | `../wt-4d-devops-cicd` |
@@ -458,3 +458,11 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
 - **Left / must know:** AC33 (full run with the stack) and AC34 (CI checks, gitleaks) are the orchestrator's. The file takes
   ~3 minutes on Windows (each case spawns Git Bash on a temp repo); tests run concurrently. AC6 reads Git Bash's shared
   `/tmp/verify-*.log` files; fixtures never print values, so concurrent runs can't cause false hits.
+
+### orchestrator, 2026-11-25 (verify)
+
+- qa-test fixes after full runs: fake DB URL built from parts (cba8034, the fallback secret scan matched it), explicit
+  per-test timeout for 4a's Git Bash suites (669fe6a, a load-sensitive 5 s timeout).
+- Full `bash scripts/verify.sh` (with DB, local stack env in the shell only): `verify.sh: PASS 20/20 (0 skipped)`.
+- State → IN_REVIEW; security gate and code review next, each in a fresh context. Standing check: no workflow step
+  reads a `SUPABASE_*` secret outside drift.yml (decision 2026-11-25-4d-supabase-secrets-accepted-until-step4.md).
