@@ -1,98 +1,78 @@
 Result: PASS
 
-# Security gate: task 0, PR #2 (gate hardening), pass 3
+# Security gate: task 0, drift artifact (`ci/0-drift-artifact`)
 
 - **Reviewer:** security (fresh context, no builder conversation; judged from the repo only)
 - **Date:** 2026-11-25
-- **Branch / HEAD reviewed:** `ci/0-gate-hardening` @ `09a0f56`, diff `git diff origin/main...HEAD` (16 files)
-- **Previous gate:** `7390bbd` (PASS, reviewed `157efb0`). This pass re-runs the gate because `09a0f56` changed code after it.
-
-## Scope of change since the last gate
-
-`git diff 7390bbd HEAD --stat` lists exactly the 4 files of `09a0f56` (`drift.yml`, `PROJECT_CONTEXT.md`,
-`tasks/0/TASK_BRIEF.md`, `tasks/decisions.md`, +9/-7), and `7390bbd` itself only touched this file. So
-the rest of the PR diff is byte-identical to what `7390bbd` reviewed, and its evidence for
-`gate.yml`, `gate-check.sh`, `verify.sh` and `ci.yml` still holds. This pass re-checks `09a0f56` in full.
+- **Branch / HEAD reviewed:** `ci/0-drift-artifact` @ `8a353f3`, diff `git diff origin/main...HEAD` (3 files, +18/-1): `.github/workflows/drift.yml`, `roles/devops-cicd.md`, `tasks/decisions.md`
+- **Decision this relies on:** `tasks/decisions.md:12` (the person keeps the repo public and allows a manual drift run to upload the raw diff as a 1-day artifact with `upload_diff=true`; schedule and default runs never expose it).
 
 ## Applicable baseline rows
 
-Row 13 (brief), plus the merge-approval control (ORCHESTRATOR 3a) and the drift check this PR
-changes. Rows 1-12 and 14: nothing new (no app code, routes, tables or migrations).
+Row 13 (no secrets in files / logs / artifacts) and the drift check (rules/database-and-deploy.md rule 7). Rows 1-12 and 14: nothing new (no app code, routes, tables, migrations, env vars or client code).
 
-### Row 13: `.env` in Git / no secrets in files
+### The upload step can't run on schedule or a default dispatch
 
-| Control | Where | Proof | Result |
-|---|---|---|---|
-| verify.sh secret checks | `scripts/verify.sh` | "no .env files tracked", "basic secret pattern scan" PASS (gitleaks not installed locally; fallback scan). Unchanged since `7390bbd`. | PASS |
-| CI secret scan | `ci.yml` `secrets` job | unchanged | PASS |
-| No project ref, key or password in any file | whole tree at HEAD | `git grep` at HEAD for `<20-char ref>.supabase.co`, JWTs (`eyJ…`), `sb_secret_`/`sb_publishable_`, `postgres://user:pass@`, literal `SUPABASE_DB_PASSWORD=`: no hits. `09a0f56` adds only the project name (AutomationTests), the region (Europe) and the environment name `production`. No 20-char lowercase ref string in `PROJECT_CONTEXT.md`, `tasks/` or `specs/`. | PASS |
+Step: `drift.yml:95-102`, `if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && hashFiles('diff.sql') != ''`.
 
-### Drift check (`drift.yml`, changed in `09a0f56`)
-
-| Check | Where | Proof | Result |
-|---|---|---|---|
-| S22: fails closed on a non-numeric count | `drift.yml:77-86` | The test is now `[ "$CHANGED_LINES" != "0" ]`, so only an exact `0` passes. Step logic copied into a scratch script (run under `bash -e`, as Actions does): empty diff: `drift=no`, exit 0. Comments, blank lines and CRLF only: `0`, pass. One SQL line: `drift=yes`, exit 1. Missing `diff.sql` (grep exit 2, empty output): exit 1. Non-numeric output `abc`, blank output, `" 0"`: all exit 1. `grep -c` prints `0` and exits 1 on no match, and `|| true` keeps the `0`, so the clean case still passes. | PASS (S22 closed) |
-| Nothing new in the public log | `drift.yml:72-78`, `:94-95` | Unchanged by `09a0f56` apart from the `if` and a comment. The log still gets only a count and a 12-hex sha256. On odd output the count line echoes the odd value; it comes from `grep -c` on the diff file, so it is a number or empty, never diff content. Issue body still has no diff. | PASS |
-| Secrets scoping | `drift.yml:24`, `:35-69` | unchanged: `environment: production`, secrets only on the link and diff steps, `persist-credentials: false`. | PASS |
-
-### Merge-approval control (`gate.yml` + `gate-check.sh`)
-
-Unchanged since `7390bbd`; its proofs (F1 closed: `--base origin/main` hard-coded, non-`main` bases exit,
-`edited` trigger; S17 head-SHA pin; concurrency; PR code never executed) carry forward.
-
-### S25: documentation consistency (changed in `09a0f56`)
-
-| Check | Where | Result |
+| Case | Evaluation | Result |
 |---|---|---|
-| Hard constraint no longer says "no cloud project until the person decides" | `PROJECT_CONTEXT.md:104` | Now states the person connected the project and integration on 2026-11-25, that agents never write to production, and that L11 risks need a decision before the first real table. PASS |
-| Secrets table | `PROJECT_CONTEXT.md:82-84` | Drift secrets listed as `production` environment secrets (main only), consistent with `tasks/decisions.md` and `drift.yml:24`. PASS |
-| AC3 and Blocked | `tasks/0/TASK_BRIEF.md:20`, `:100` | AC3 records the deploy path; Blocked (1) marked done by the person; remaining items (green drift run, branch protection, label, L11 decision) listed. PASS |
-| Decision recorded | `tasks/decisions.md:11` | New row: project created, integration connected, drift secrets stored, by the person. PASS |
+| `schedule` | `github.event_name == 'workflow_dispatch'` is false; also `inputs` is empty on schedule, so `inputs.upload_diff` is null (falsy). Two independent false terms. | skipped. PASS |
+| `workflow_dispatch`, default | input is `type: boolean`, `default: false` (`drift.yml:9-13`). The `inputs` context keeps the boolean type, so `inputs.upload_diff` is `false`. The classic pitfall (`github.event.inputs.upload_diff` is the string `'false'`, which is truthy) is avoided: the expression uses `inputs.`, not `github.event.inputs.`. | skipped. PASS |
+| `workflow_dispatch`, `upload_diff=true` | all terms true if `diff.sql` exists. | runs (intended, accepted) |
+| `always()` | Needed so the step still runs after the diff step exits 1 on drift (the case worth investigating). It does not widen the trigger: the other three terms are ANDed. If an earlier step failed before the diff (missing secrets, `npm ci`, link), `diff.sql` does not exist, `hashFiles` returns `''`, step skipped. On cancel, same terms apply. | PASS |
+| Effect on the drift issue | The upload step does not change `failure()`/`steps.diff.outputs.drift`, so the issue step (`drift.yml:104`) behaves as before; the issue body still has no diff. | PASS |
 
-S25 is closed. Two small doc leftovers are listed as S27 below.
+Workflow parses: loaded with `js-yaml` from `node_modules`; `on` has `schedule` + `workflow_dispatch.inputs.upload_diff {type: boolean, default: false}`, and the step's `if`/`with` come out as written.
 
-## Automated results (local, HEAD `09a0f56`)
+### Only `diff.sql` is uploaded
+
+| Check | Proof | Result |
+|---|---|---|
+| Path | `path: diff.sql` (single literal file, no glob, no directory). `diff.err` (CLI stderr, may hold connection detail) and `.git` are not matched. | PASS |
+| `supabase/.temp` (link data) | `supabase link` writes the project ref, pooler URL (host and `postgres.<ref>` user, no password), service versions and linked-project metadata into `supabase/.temp/` (gitignored, `supabase/.gitignore:3`). It is a different path from `diff.sql`, so it is not in the artifact; upload-artifact v7 also excludes hidden files/dirs by default. Access token and DB password are passed by env only (`drift.yml:63-66`, `:71-73`), not written by this workflow. | PASS |
+| Content of `diff.sql` | stdout of `supabase db diff --remote --schema public` (`drift.yml:78`); CLI progress and errors go to `diff.err`. So it is schema SQL for `public` only. | PASS |
+| `if-no-files-found: error`, `retention-days: 1`, fixed name `drift-diff` | `drift.yml:99-102` | PASS |
+
+### Action pin
+
+`git ls-remote https://github.com/actions/upload-artifact`: `refs/tags/v7.0.2` = `cf430e030ddbb5b0abf93d22962f4752f3646cd9` (lightweight tag, same as `refs/tags/v7` and `main`), matching `drift.yml:97` `@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2`. PASS
+
+### Who can trigger it
+
+| Check | Proof | Result |
+|---|---|---|
+| `workflow_dispatch` needs write access | GitHub only lets users with write (or higher) on the repo dispatch a workflow (UI, `gh workflow run`, or REST). Read-only users and the public can't. | PASS |
+| A PR can't trigger it | `pull_request`/`pull_request_target` don't fire `drift.yml`. A token could dispatch only with `actions: write`; no workflow in the repo grants it (`ci.yml:9-10`, `gate.yml:10-11` `contents: read`; `drift.yml:16-18` `contents: read`, `issues: write`), and fork PR tokens are read-only. A PR that edits `drift.yml` changes nothing until merged (gate + `framework-change-approved`, which agents never add). | PASS |
+| Dispatch on a non-main ref | the job uses `environment: production` (`drift.yml:29`), restricted to `main` (decisions.md:10), so a dispatch from another branch (with an edited workflow) can't get the environment or its secrets. Not verified on GitHub (S19 carries). | PASS (by config) |
+
+### Secrets and residual exposure (accepted)
+
+- **No secrets in the artifact:** the artifact holds schema SQL only; no token, password or `.temp` link data (see above). The upload action gets the runner's `ACTIONS_RUNTIME_TOKEN`, not the Supabase secrets (step-level env only on link/diff).
+- **Residual exposure during the window (accepted by the person, decisions.md:12):** on a public repo, any signed-in GitHub user (and anyone with a token via the API) can download `drift-diff` from the run page until it is deleted or expires (retention 1 day; the "delete right after download" step is manual and not enforced). What leaks is the diff between production and `supabase/migrations` for `public`: table/column/index names, RLS policies (which reveal access logic and any gaps in it), function and trigger bodies, grants, defaults. If someone put a literal secret in production SQL (a function body, a column default, a `comment on`), it would be in the diff; nothing scans the artifact. If the drift is malicious (attacker-made object), the artifact shows the attacker that it was detected. The run's existence and the `drift-diff` artifact name are also public.
+- **S28 (new, Low, should-fix):** before uploading, the person (whoever dispatches) should know the above; the input description says the download is public (`drift.yml:11`). Optional hardening, not required: run the existing secret pattern scan (or gitleaks) on `diff.sql` before upload and skip the upload on a hit; or encrypt `diff.sql` with a key held only by the person. Owner: devops-cicd; the person decides.
+- **S29 (new, Low, doc):** if the CLI fails part-way, a partial `diff.sql` can still be uploaded on an opt-in run (the `always()` path). Still schema SQL only; no action needed beyond knowing it.
+
+## Automated results (local, HEAD `8a353f3`)
 
 | Check | Result |
 |---|---|
+| `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker) | `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script); secret pattern scan on changed files PASS (gitleaks not installed locally) |
 | `npm audit --audit-level=high` | `found 0 vulnerabilities` |
-| `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker) | `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script) |
-| Supabase security advisors | Not run: agents don't touch the cloud project in this task, and the PR adds no schema |
+| Workflow parse (js-yaml) | parses; see above |
+| Supabase security advisors | Not run: agents don't touch the cloud project; the PR adds no schema |
 | RLS check | verify.sh static check PASS, `supabase test db` PASS (no tables) |
 
 ## Findings
 
 ### FAIL-worthy
 
-None. F1 stays closed (see `7390bbd`). `09a0f56` adds no exploitable hole and no secret.
+None. The upload runs only on a write-access user's manual dispatch on `main` with `upload_diff=true`, uploads only schema SQL, and the remaining exposure is exactly what the person accepted.
 
-### Should-fix (carried from `7390bbd` unless marked new)
+### Should-fix
 
-| # | File:line | Severity | Problem (short; full text in `7390bbd`) | Fix | Owner |
-|---|---|---|---|---|---|
-| S14 (open, now more urgent) | `gate.yml`, branch protection, `tasks/lessons.md` L11 | High (pre-existing) | Check-name spoofing: any Actions job named `merge-gate` reports under the same check. Two variants: a `pull_request` job in the PR head (in L11) and a spoof `gate.yml` on a pushed base branch, then retarget to `main` and re-run the old spoof run (not in L11; L11's suggested fix misses it). Not verified on GitHub. With the Supabase GitHub integration now connected, a merge to `main` applies migrations to production, so this is a path to a production write. | Partial: gate-check fails on other `merge-gate`/`gate` jobs in the head; restrict branch creation or check base history before merging. Full: a check source workflows can't imitate (GitHub App / required workflow). Add the base-branch variant to L11 and `ORCHESTRATOR.md:69-70`. The person decides before the first real table (as `PROJECT_CONTEXT.md:104` now says). | devops-cicd; the person |
-| S5 (open) | `gate-check.sh:51` | Medium (pre-existing) | A `tasks/**`-only PR (incl. `tasks/decisions.md`) passes with stale gate files. | As in L11. | devops-cicd |
-| S15 (open) | `gate-check.sh:64` | Medium (pre-existing) | Protected-path list misses `.gitleaks.toml`, rest of `.github/**`, `package.json`/lockfile, `supabase/config.toml`, `templates/`, `AGENTS.md`. Note `supabase/config.toml` and `supabase/migrations` now feed production directly. | Extend the pathspec. | devops-cicd |
-| S16 (open) | `gate-check.sh:66`, `gate.yml:44` | Medium (pre-existing) | Label not tied to a commit. | Re-add after each push, or record the approved SHA. | the person; devops-cicd |
-| S19 (open) | `drift.yml:24` | Medium (pre-existing) | Nothing checks the `production` environment's main-only policy or the absence of repo-level `SUPABASE_*` secrets. | bootstrap-check, read-only `gh api`. | devops-cicd |
-| S20/S21 (open) | `roles/git-release.md:19`, `ORCHESTRATOR.md:69` | Low | Ownership wording contradicts AGENT_RULES 18a; "can't edit the gate" overstates the control. | Reword. | the person |
-| S23 (accepted) | `drift.yml:74` | Low | `tail -20 diff.err` on CLI failure; derived values of secrets aren't masked. | Keep, or print the first error line only; re-check the first failing run. | devops-cicd |
-| S24 (info) | `drift.yml:78` | Info | 12-hex hash of a non-empty diff allows confirming a guessed diff. Negligible. | None. | none |
-| S26 (new, `09a0f56`) | `drift.yml:80-83`, `:89` | Low | Failing closed is correct, but an odd count (missing file, grep error) is reported as `drift=yes`, so the job opens a drift issue saying "production differs" and triggers stop rule 1 for what is really a broken check. | Optional: `case "$CHANGED_LINES" in ''|*[!0-9]*) echo "::error::could not count diff lines"; exit 1;; esac` before the drift test, so odd output fails without `drift=yes`. | devops-cicd |
-| S27 (new, `09a0f56`) | `drift.yml:9`, `tasks/lessons.md` L11 | Low (doc) | `drift.yml:9` still says to add a post-deploy `workflow_run` trigger "once the deploy path exists"; it exists now (the integration has no workflow to hook, so it stays nightly). L11 still lacks S14's base-branch variant. | Reword the comment; add the variant to L11. | devops-cicd |
-
-S22 and S25 (from `7390bbd`) are closed by `09a0f56`.
-
-### Temporary state (unchanged from `7390bbd`)
-
-Until this PR merges, the required check is the old `gate` job in `ci.yml`, which runs the PR's own
-`gate-check.sh` and proves nothing for this PR. The real control for PR #2 is the person reading the
-diff and adding `framework-change-approved`. After the merge: the person makes `merge-gate` required
-instead of `gate` with bypass off, and the follow-up PR removing the `gate` job merges under `merge-gate`.
-Since the integration is connected, merging this PR applies the `init` migration (no schema change)
-to production; that is expected and harmless.
+New: S28, S29 (above). Carried open from the previous gate (`specs/0/security-gate.md` at `origin/main`'s PR #2 pass, unchanged by this PR): S14 (check-name spoofing of `merge-gate`), S5, S15, S16, S19 (nothing verifies the `production` environment's main-only policy; this PR now also relies on it), S20/S21, S23, S24, S26, S27. Note for S15: `roles/devops-cicd.md` is a framework file, so this PR needs the person's `framework-change-approved` label.
 
 ## Secret exposure
 
-None found. No secret values were read, used or printed. No Supabase cloud, GitHub settings or labels
-were touched, and nothing was pushed.
+None found. No secret values were read, used or printed. No Supabase cloud, GitHub settings, labels or workflows were touched or triggered, and nothing was pushed.
