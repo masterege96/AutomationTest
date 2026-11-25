@@ -1,4 +1,4 @@
-# Task 2a: Revoke EXECUTE on future functions in `public` from PUBLIC, anon and authenticated
+# Task 2a: Revoke EXECUTE on future functions (all schemas, functions created by postgres) from PUBLIC, anon and authenticated
 
 | Field | Value |
 |-------|-------|
@@ -123,5 +123,5 @@ specs/2a/**     # schema.md (db-architect), threat-model.md + security-gate.md (
 
 ### orchestrator, 2026-11-25
 
-- Merged main (PR #8, PR #9) into this branch: tasks/ files only. This branch's lesson renumbered L17 → L20 (lesson-number collision, see L19).
+- Merged main (PR #8, PR #9) into this branch: it brought main's tasks/ docs, `scripts/verify.sh` and `specs/2c/**`; none are in this PR's net diff. This branch's lesson renumbered L17 → L20 (lesson-number collision, see L19).
 - Review nit 6 (schema.md's T3/T4 pattern without `; reset role`) is left for the next function migration's db-architect, to keep this task's gates fresh; L20 records the safe pattern.
