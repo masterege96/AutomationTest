@@ -105,7 +105,7 @@ specs/2a/**     # schema.md (db-architect), threat-model.md + security-gate.md (
 - **Changed:**
   - `supabase/migrations/20261125150215_function_privileges.sql` (new, from `npx --no-install supabase migration new function_privileges`): exactly schema.md section 1's three statements (`ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC / "anon" / "authenticated"`, no `IN SCHEMA`) plus comments. No existing migration edited. Creates no objects, no data.
   - `supabase/tests/02_function_privileges_test.sql` (new, `plan(30)`): T1 (3: global row exists; no EXECUTE for PUBLIC/anon/authenticated; `defaclacl::text = '{postgres=X/postgres}'`), T2 (16: anon/authenticated/service_role false and postgres true on `public.t2_probe()`, `public.t2_probe_definer()`, `t2_other.t2_probe()`, procedure `public.t2_probe_proc()`), T3 (5: four `throws_ok` 42501 with the exact `permission denied for function ...` messages, then `current_user = 'postgres'`), T6 (1: no per-schema postgres function row except `storage` grants EXECUTE to PUBLIC/anon/authenticated/service_role), idempotence (2: same row count and same `defaclacl` text for every postgres default ACL row after re-running the three statements), T4 (3: explicit grant, `lives_ok` as authenticated, anon still false, `current_user = 'postgres'`). T5 = `01_default_privileges_test.sql`, unchanged, passes.
-  - One deviation in form, not in meaning: each T3 SQL string ends with `; reset role` (after the call). It only runs if a call wrongly succeeds; without it, a successful call leaves `set local role` in effect and the rest of the file runs as `anon`/`authenticated` (seen in the first negative-control run: T6 onward aborted with "permission denied to change default privileges", bad plan 25/30). See lessons L17.
+  - One deviation in form, not in meaning: each T3 SQL string ends with `; reset role` (after the call). It only runs if a call wrongly succeeds; without it, a successful call leaves `set local role` in effect and the rest of the file runs as `anon`/`authenticated` (seen in the first negative-control run: T6 onward aborted with "permission denied to change default privileges", bad plan 25/30). See lessons L20.
 - **Verified (under the shared lock):**
   - `npx --no-install supabase db reset`: all 3 migrations apply.
   - `npx --no-install supabase test db`: `Files=3, Tests=45`, Result PASS (00: 3, 01: 12, 02: 30).
@@ -120,3 +120,8 @@ specs/2a/**     # schema.md (db-architect), threat-model.md + security-gate.md (
 
 - **Missing:**
 - **Who must provide it:**
+
+### orchestrator, 2026-11-25
+
+- Merged main (PR #8, PR #9) into this branch: tasks/ files only. This branch's lesson renumbered L17 → L20 (lesson-number collision, see L19).
+- Review nit 6 (schema.md's T3/T4 pattern without `; reset role`) is left for the next function migration's db-architect, to keep this task's gates fresh; L20 records the safe pattern.

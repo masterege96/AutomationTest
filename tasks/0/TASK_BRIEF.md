@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | BLOCKED |
+| State | DONE |
 | Owner role | git-release, devops-cicd |
 | Branch | `main` for the first two commits (Phase 0 exception: the repo was empty, before branch protection); then `ci/0-phase0-fixes` (PR #1), `ci/0-gate-hardening` (PR #2), `ci/0-gate-cleanup` (PR #3) |
 | Worktree | none (repo root `C:\Users\tubae\Claude\AutomationTest`) |
@@ -102,7 +102,13 @@ supabase/tests/*
 - **Left to do:** the Blocked items; then one green drift run and the init migration visible in production history.
 - **Next role must know:** the Supabase connector here has write tools; never use them against production (AGENT_RULES 13). Open review nit N7 (gate-check.sh header: `tasks/**` not counted as code, bold `**Result:**` accepted) goes in the next script change.
 
+### git-release, 2026-11-25 (post-deploy, task moved to DONE on the orchestrator's instruction)
+
+- **Phase 0 gate evidence:** `bootstrap-check.sh` (full) `PASS 31/31 (0 skipped)` on main; `main` protected (PR required, 0 approvals, required checks `verify`, `db-check`, `secrets`, `merge-gate`, admins included); deploy path = Supabase GitHub integration (branch `main`, directory `.`, Deploy to production on), which deployed both migrations; drift check green (run 45634163709, `diff: 0 non-comment lines`).
+- **Merged:** PR #1 35a461c, #2 67b7204, #3 05cc5d9, #5 ce60fdb, #6 (incident report), #7 5fcb5ba.
+- **Left open (not blocking DONE):** lessons L11 (accepted/open merge-gate risks), L15, L16; PUBLIC EXECUTE on future functions.
+
 ## Blocked (fill in only when BLOCKED)
 
-- **Missing:** (1) done by the person 2026-11-25: Supabase project AutomationTests + GitHub integration, `production` environment with the drift secrets, `SUPABASE_PROJECT_ID` corrected; (2) the person: drift token scopes (L13), then one green drift run on main (git-release re-runs it); (3) the person: Supabase integration has not applied the init migration yet (production history empty, L13), check its settings; (4) the person: branch protection required check `merge-gate` instead of `gate`, bypass not allowed; (5) the person: `framework-change-approved` label on PR #3; (6) S14 accepted for the pilot (decisions 2026-11-25); the other L11 risks still need a decision before the first real table.
+- **Missing:** none (resolved 2026-11-25; see the post-deploy entry above).
 - **Who must provide it:** the person
