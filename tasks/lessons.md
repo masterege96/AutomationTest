@@ -311,3 +311,19 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   value (known default or last applied), and shows current -> new and waits for the person's "yes".
 - **Open questions for the person (not decided):** may the person's read-only verification SELECTs in the dashboard
   SQL editor be written into the rules as allowed? Does a docs-only task (like 2d) need its own post-deploy record?
+
+## L25. A nonce CSP conflicts with `cacheComponents` / partial prerendering (open, devops-cicd + security)
+
+- **Seen:** task 3 design. A per-request nonce needs every page rendered per request; Next 16's docs say nonces don't
+  work with `cacheComponents` (the build-time shell has no nonce). Task 3 set `cacheComponents: false`, removed
+  `partialPrefetching` and made the root layout dynamic (`await connection()`).
+- **Risk:** the Next docs say these options become always-on in the next major version.
+- **Fix:** at every Next.js upgrade, devops-cicd re-runs the CSP e2e tests (`tests/e2e/csp.spec.ts`) and security
+  re-checks threat model section 6 before the upgrade merges. Add this to the devops-cicd contract's upgrade rule.
+
+## L26. Two Next.js request headers bypass route handlers (open, security)
+
+- **Seen:** task 3 integration. `x-middleware-prefetch: 1` made Next answer 200 `{}` before any /api handler (fixed:
+  `proxy.ts` strips it for /api only). `rsc: 1` makes Next answer 307 to `?_rsc` before any handler; documented
+  exception in `specs/3/threat-model.md` 3.7 (following it gives 401; no data).
+- **Fix:** keep T1's header list in the abuse suite and re-check it at every Next.js upgrade (same rule as L25).

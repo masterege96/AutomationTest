@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_PROGRESS |
+| State | IN_REVIEW |
 | Owner role | db-architect (`specs/3/schema.md`), security (`specs/3/threat-model.md`, `specs/3/security-gate.md`), db-builder (DB), backend-dev (API, server auth, nonce CSP proxy), frontend-dev (UI), qa-test (tests, `specs/3/test-plan.md`), devops-cicd (scripts, devDependencies, lockfile, `next.config.*` headers block, CI), code-reviewer (`specs/3/review.md`) |
 | Branch | `feat/3-todos` |
 | Worktree | integration `../wt-3-todos` (`feat/3-todos`); builders: `../wt-3-db-builder` (`db/3-todos-schema`), `../wt-3-devops-cicd` (`ci/3-todos-tooling`), then `../wt-3-backend-dev`, `../wt-3-frontend-dev`, `../wt-3-qa-test`; each merged into `feat/3-todos` by the orchestrator |
