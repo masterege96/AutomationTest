@@ -256,7 +256,7 @@ Question 2 is for the person to decide. Nothing was built. Sources: `node_module
 | `POST /api/todos` | `{"title":string}` | 201 `{"todo":{…}}` | 400, 401, 403, 413, 415 |
 | `GET /api/todos/[id]` (for AC22 "read") | none | 200 `{"todo":{…}}` | 400 bad id, 401, 404 |
 | `PATCH /api/todos/[id]` | `{"title"?:string,"done"?:boolean}`, at least one | 200 `{"todo":{…}}`; setting done twice is idempotent (AC43) | 400, 401, 403, 404, 413, 415 |
-| `DELETE /api/todos/[id]` | none | 204, empty body | 400 bad id, 401, 403, 404 (also on a second delete, AC44) |
+| `DELETE /api/todos/[id]` | none | 204, empty body | 400 bad id, 401, 403, 404 (also on a second delete, AC44), 415 (non-JSON content type; orchestrator, after review round 2) |
 - **Validation (zod):** `z.strictObject` on create and patch, so any unknown field (`user_id`, `id`, `done` on create, `created_at`) gives 400 (AC28/AC29). Title: `z.string().trim()`, then a refine that counts code points (`[...s].length`) between 1 and 200. zod's `.min`/`.max` count UTF-16 units, which would wrongly reject 200 emoji (AC16). `done` is `z.boolean()`, so `"true"`, `1` and `null` give 400. The `[id]` param uses zod's uuid check (`z.uuid()`), assuming `specs/3/schema.md` uses uuid ids. Not-yours and not-found are the same case: the query runs with `.eq('id', id)` under RLS, and 0 rows means 404 with the same body (AC22).
 - **Body:** the content type must be `application/json`, otherwise 415. A `Content-Length` over 10240 gives 413 before reading. Otherwise the handler reads `request.text()`, returns 413 if the UTF-8 byte length is over 10240 (this catches chunked bodies with no length), then runs `JSON.parse`; a parse failure gives 400 `invalid_json`.
 - **CSRF:** route handlers have no built-in Origin check (the docs describe one only for Server Actions). `lib/server/origin.ts` gives 403 `forbidden_origin` unless `Origin` exactly equals the app's own origin; a missing Origin is also refused. Requiring JSON also forces a CORS preflight on cross-site requests, and the app sends no CORS headers. Cookies stay `SameSite=Lax`, the @supabase/ssr default. Proof: a request with `Origin: https://evil.example` plus A's cookies gives 403 and changes nothing.
@@ -437,3 +437,16 @@ Branch `test/3-todos-tests` fast-forwarded to the integrated `4469360`, plus `31
 
 - **Missing:**
 - **Who must provide it:**
+
+### orchestrator, 2026-11-25 (gates)
+
+- **Gate round 1** (HEAD e9078ba, fresh agents): security PASS; review CHANGES_REQUESTED (should-fix: DELETE without 415).
+  Fixed by backend-dev (ef37275), qa-test added the C3 DELETE cases (e4e8cd3), frontend-dev nit 3 (cdca71a). The round-1
+  gate files were not committed.
+- **Gate round 2** (HEAD 75d75fe, fresh agents): security PASS (`verify.sh: PASS 19/19 (0 skipped)`, e2e 135/135, npm test
+  211/211), review APPROVE (nits only: test layout, PROJECT_CONTEXT refresh, invisible chars in the trim set, Origin with
+  explicit port, CI timeout). Gate files committed after the last code commit.
+- **Release lock (AC46):** merging deploys the empty table only. No real users until the person records P1-revised (row 9
+  burst: (a) / (b) 8-digit codes / (c) accept), P2, P4 (once a host is chosen), SMTP (item 1), URLs (item 21), Turnstile
+  (item 9, task 3b) and production email templates with `{{ .Token }}` in `tasks/decisions.md`.
+- **Needs the person:** the `framework-change-approved` label (`.github/workflows/ci.yml`).

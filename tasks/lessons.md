@@ -327,3 +327,11 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   `proxy.ts` strips it for /api only). `rsc: 1` makes Next answer 307 to `?_rsc` before any handler; documented
   exception in `specs/3/threat-model.md` 3.7 (following it gives 401; no data).
 - **Fix:** keep T1's header list in the abuse suite and re-check it at every Next.js upgrade (same rule as L25).
+
+## L27. verify.sh's client-bundle secret check can silently skip (open, devops-cicd)
+
+- **Seen:** task 3 security gate. `scripts/verify.sh` (around lines 182-191) scans the client bundle before the build
+  runs, so on a clean tree there is no bundle and the check is skipped; it also only compares secret values exported in
+  the shell, which neither CI nor the documented commands export.
+- **Fix (framework change, the person's label):** run the bundle scan after `npm run build`, read the local secret
+  values from `npx supabase status -o env` inside the script (never printed), and FAIL if there is no bundle to scan.
