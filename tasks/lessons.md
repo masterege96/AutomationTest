@@ -197,3 +197,27 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   exposed schema grants exactly the privileges the API needs, and a pgTAP test checks those grants.
 - **Process note:** drift run 45624888333's artifact was downloaded and deleted about a minute after upload;
   the opt-in upload path worked as designed (gitleaks clean).
+## L15. verify.sh flags privilege names as destructive SQL (open, the person decides)
+
+- **Seen:** task 1, `verify.sh --brief tasks/1/TASK_BRIEF.md`:
+  `FAIL  destructive statements need approval` on every `GRANT/REVOKE ... TRUNCATE ...` line (and on a comment line).
+- **Cause:** the destructive scan matches the bare word `truncate`, so the privilege name in `GRANT`/`REVOKE`
+  (and comments) counts as `TRUNCATE TABLE`. Task 1 drops nothing and touches no data.
+- **Options (the person):** (a) add `destructive-approved` to the PR as a reviewed override for this one
+  false positive; or (b) approve a framework fix first (framework-change-approved): skip lines starting
+  with `--`, and match `truncate` only as a statement (`^\s*truncate\b` or `;\s*truncate\b`), not inside
+  `GRANT`/`REVOKE` lists. Owner: devops-cicd.
+
+## L16. Adding a label didn't re-run CI on PR #7 (open, investigate in plan step 4)
+
+- **Seen:** the person added `destructive-approved` to PR #7 after its only ci run (45630952913, event
+  `pull_request`, 14:09 UTC). No new ci run appeared, so `verify` kept the old FAIL.
+- **Not the cause:** ci.yml already triggers on `pull_request: types: [opened, synchronize, reopened,
+  labeled, unlabeled]` (since PR #1). The suggested trigger change is therefore already in place.
+- **Also:** re-running an old run (`gh run rerun --failed`) re-uses that run's event payload, so it would
+  still see the labels from before. A label change needs a new run.
+- **Workaround used:** merging main into the PR branch (a push, `synchronize`) started a fresh run that
+  sees the label.
+- **To check in step 4 (devops-cicd):** whether the `labeled` event run was created and cancelled by the
+  `concurrency: ci-${{ github.ref }}` group, or never created (e.g. Actions delay). Then document the
+  expected way to re-evaluate a PR after a label change.
