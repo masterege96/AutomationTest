@@ -221,3 +221,13 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **To check in step 4 (devops-cicd):** whether the `labeled` event run was created and cancelled by the
   `concurrency: ci-${{ github.ref }}` group, or never created (e.g. Actions delay). Then document the
   expected way to re-evaluate a PR after a label change.
+
+## L18. verify.sh ran the project tests before the local database started (fixed in task 2c)
+
+- **Seen:** task 2b design: `scripts/verify.sh` ran "Project checks" (`npm test`, `test:e2e`) before
+  "Database from scratch" started the local Supabase stack, so tests that need the stack (auth, e2e)
+  could not pass in verify.sh or CI.
+- **Fixed:** task 2c moves the database section before the project checks (headings renumbered, comment
+  at the section). No check added, removed or changed.
+- **Still open:** the CI `verify` job sets no local-stack env vars (URL, keys). That is a separate task
+  (devops-cicd, workflow) when the first test that needs them lands.

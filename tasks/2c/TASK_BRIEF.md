@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | BACKLOG |
+| State | IN_REVIEW |
 | Owner role | devops-cicd |
 | Branch | `ci/2c-verify-db-first` |
 | Worktree | `../wt-2c-devops-cicd` |
@@ -91,6 +91,50 @@ scripts/verify.sh
 - **Verified:** brief from `templates/TASK_BRIEF.md`; section order read from `scripts/verify.sh` (project checks at lines 199-221, database at 223-255, summary at 257-265).
 - **Left to do:** devops-cicd makes the change; security and code-reviewer gates; the person adds `framework-change-approved`.
 - **Next role must know:** keep the moved block byte-identical (AC11). The `skip ... required` helper is what makes `--no-db` FAIL in CI; don't touch it.
+
+### devops-cicd, 2026-11-25
+
+- **Changed:** `scripts/verify.sh` (commit "ci: verify.sh runs the database section before the project checks"):
+  "Database from scratch" now runs before "Project checks". Headings renumbered in file order
+  ("5. Database from scratch", "6. Project checks (typecheck, lint, tests, build)"), and a 2-line comment
+  at the database section: it runs first because tests that need the running local stack (auth, e2e)
+  must find it started and freshly built; the stack is left running. No check, command, flag, message or
+  summary line changed. `tasks/lessons.md`: L18. Questions 1 and 2: defaults taken (env vars for the local
+  stack are a separate task; resetting the local DB before the tests is fine).
+- **Verified** (Windows, Git Bash, local Supabase stack in Docker; no port or container conflict hit):
+  - `bash -n scripts/verify.sh`: OK. LF only (no CR in the file).
+  - AC11: `git diff --color-moved=zebra origin/main -- scripts/verify.sh` shows the 22 project-check lines
+    as moved. The only plain -/+ lines are the two old headings, the two new headings and the 2 comment lines.
+    I also compared both blocks with `diff` against the old file: byte-identical. (Git shows the project
+    block as the moved one rather than the DB block; the reordering is the same.)
+  - AC1/AC12: `bash scripts/verify.sh --brief tasks/2c/TASK_BRIEF.md`: order `[scope]`, `[migrations]`,
+    `[secrets]`, `[code safety]`, `[database]`, `[project]`. Summary: `verify.sh: PASS 18/18 (1 skipped)`
+    (with `.next/` already built; on a tree without `.next/` the first run gives `verify.sh: PASS 17/17 (1 skipped)`
+    because "client bundle has no server secrets" only runs when `.next/static` exists. The old script behaves the same way).
+  - AC2: old script (`git show origin/main:scripts/verify.sh`) run the same way, same machine state:
+    `verify.sh: PASS 18/18 (1 skipped)`; sorted PASS/FAIL/SKIP lines identical to the new script's.
+  - AC9: the DB log shows only `db reset`, `test db`, `db lint` steps (no stop); `supabase status` exits 0 right after the run.
+  - AC5: `--no-db`: `[database]` shows only `SKIP  database build from scratch (--no-db)`, the DB log stays
+    empty, `[project]` runs. `verify.sh: PASS 15/15 (2 skipped)` (old script: same line).
+  - AC6: `CI=true ... --no-db`: `FAIL  database build from scratch (--no-db) (skipped, but required in CI)`.
+    `verify.sh: FAIL 2/16 failed: secret scan (gitleaks not installed in CI), database build from scratch (--no-db) (skipped, but required in CI) (1 skipped)`
+    (old script: same line; the gitleaks FAIL is because gitleaks isn't installed on this machine, CI installs it).
+  - AC7 (stub; Docker was NOT stopped because other work uses it): a scratch dir first on PATH with a fake
+    `supabase` (`status` and `start` exit 1 with a "Cannot connect to the Docker daemon" message) and a fake
+    `npx` (exits 1 when asked for `supabase`, otherwise runs the real npx). Result: `FAIL  local database
+    could not start` with the log tail and the Docker/ports hint, then `SKIP  migrations, database tests and
+    SQL lint (local database not running)`, both before `[project]`; all five project lines follow; exit 1;
+    `verify.sh: FAIL 1/16 failed: local database could not start (2 skipped)`. The stub log showed only
+    `status` and `start` calls. The real stack stayed up (`supabase status` exits 0 afterwards).
+  - AC8 (stub): PATH without the scoop shims dir (where the real `supabase` lives) plus the fake `npx`:
+    `SKIP  database build from scratch (Supabase CLI not installed)` before `[project]`, project checks run,
+    `verify.sh: PASS 15/15 (2 skipped)`; with `CI=true` the `(skipped, but required in CI)` FAIL.
+- **Left to do:** security and code-reviewer gates; open the PR; CI `verify` and `db-check` green (AC12, not
+  checked here, nothing pushed); the person adds `framework-change-approved` (`scripts/**` is a framework path).
+- **Next role must know:** on this machine the Supabase CLI comes from a scoop shim (`supabase` on PATH,
+  3.2.0, same as the pinned devDependency), so verify.sh uses it rather than `npx`. qa-test can reuse
+  the stub method above for AC7/AC8 without stopping Docker. The CI `verify` job still sets no local-stack
+  env vars (L18). `tasks/lessons.md` has no L17 on this branch; L18 was numbered as instructed.
 
 ## Blocked (fill in only when BLOCKED)
 
