@@ -265,3 +265,33 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   too. The test still asserts `current_user = 'postgres'` afterwards.
 - **Fix to the framework (suggested, db-architect/security):** write the pattern with the trailing `reset role`
   in schema.md convention rule 5.2 and the threat-model template, so later function migrations copy the safe form.
+## L21. The local stack doesn't enforce the per-IP auth rate limits (open, security decides)
+
+- **Seen:** task 2b, manual check L1: with `token_verifications = 5` in `config.toml` (auth container env
+  `GOTRUE_RATE_LIMIT_VERIFY=5`), 10 wrong-OTP `POST /auth/v1/verify` requests all returned `403 otp_expired`,
+  no `429`, for a non-existent and for an existing unconfirmed user. The threat model expected a 429 by attempt 6.
+- **Likely cause (not verified in the GoTrue source):** GoTrue applies its per-IP limits only when a rate-limit
+  header (`GOTRUE_RATE_LIMIT_HEADER`) is configured; the local CLI stack sets none, the hosted platform does.
+- **Effect on the framework:** a live rate-limit abuse test on the local/CI stack can't prove row 9; it passes or
+  fails for reasons unrelated to the config. Today only the static config test (S5) and the production checklist cover it.
+- **Fix to the framework (suggested):** security's threat-model template says per-IP auth limits are proven by the
+  static config test locally plus a read-only post-deploy check on production (person-run), not by a local live test;
+  or devops-cicd finds a supported CLI setting that enables the header locally (needs the person's OK).
+
+## L22. A catch-up merge of main makes a task's gates stale (open, devops-cicd)
+
+- **Seen:** tasks 2a and 2b, after PR #9 merged. Merging origin/main into the branch creates a merge commit
+  that brings in main's non-tasks changes (here `scripts/verify.sh`), and `gate-check.sh` counts that merge
+  commit as the last code change, so both gates must run again although the task's own code didn't change.
+  (PR #9 itself was fine: main had only changed `tasks/**` then.)
+- **Suggested fix:** in gate-check.sh, compute the last code change with `git log --first-parent --no-merges`
+  on the branch, or compare the PR's net diff (`git diff MB..HEAD`) at the gate commit vs. at HEAD; framework
+  change, needs the person's label. Until then: merge main before running the gates, not after.
+
+## L23. Shared tasks/board.md and tasks/lessons.md caused merge conflicts for the third time (open, devops-cicd)
+
+- **Seen:** PRs #9, #10 and #11 each conflicted with main in `tasks/board.md` and `tasks/lessons.md` after
+  another task's PR merged; each time CI didn't run until main was merged in (L19), and the catch-up merge
+  made the gates stale whenever main had non-tasks changes (L22).
+- **Fix (plan step 4):** one file per task (`tasks/<id>/status.md`, `tasks/lessons/<id>-<n>.md`), or
+  append-only files with a `merge=union` rule in `.gitattributes`.
