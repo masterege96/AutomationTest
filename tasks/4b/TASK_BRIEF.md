@@ -307,3 +307,54 @@ a line for each simulated push's tip SHA (at least one line for the current HEAD
 `T1 <sha after first scripts/x.sh + gates>`, `T3 <sha after second scripts/x.sh + gates>`, label `T2` (T1<T2<T3) ->
 FAIL; label `T4` (> T3) -> PASS. AC19: second push tip changes only `app/feature.ts` -> C stays the first push's
 commit -> PASS with label T2.
+
+### devops-cicd, 2026-11-25 (build)
+
+- **Changed:** `scripts/gate-check.sh` (freshness from the PR's net change, L17/S5/S15/S16, header comment rewritten),
+  `.github/workflows/gate.yml` (new read-only API step, `pull-requests: read`). Commits `a10abf1` (Q1 interface,
+  entry above) and `d644edf` (build). Interface: exactly as in the Q1 entry above (`FRAMEWORK_CHANGE_APPROVED`,
+  `FRAMEWORK_LABEL_TIME`, `PR_HEAD_PUSHES`); no change since.
+- **Freshness mechanism:** net change at X = `git diff <merge-base(base,X)> X` on code paths (decision files as a
+  second diff, because a git pathspec can't re-include an excluded path). Gate commit G is fresh when it is in
+  MB..HEAD, net(G) == net(G^1) (G changes no code, merges included) and net(G) == net(HEAD); otherwise
+  `was not written after the last code change`. No G in MB..HEAD → `was not committed on this branch` (S5, also
+  for tasks-only PRs). A missing gate file prints only the `missing` line.
+- **S16 status: built (not BLOCKED).** Push-time source: the **repository activity API**
+  `GET /repos/{owner}/{repo}/activity?ref=refs/heads/<branch>` (`timestamp`, `before`, `after`, `activity_type`
+  push/force_push/branch_creation/branch_deletion/...). Server-recorded per ref update; the PR author can't set it.
+  Label time: `GET /repos/{owner}/{repo}/issues/{pr}/events`, latest `labeled` event for the label, `created_at`.
+  Evidence (`gh api`, read-only, masterege96/AutomationTest):
+  - PR #14 timeline `committed` events carry only commit author/committer dates (`created_at` null): unusable.
+    GraphQL `Commit.pushedDate` returns `null` (deprecated): unusable.
+  - Check suites for PR #14's head `7f12f98`: created 18:28:40/46, and again 18:34:43 (re-run by the `labeled`
+    event at 18:34:38). The newest suite postdates the label, and the oldest can predate the push into this PR
+    (same SHA run earlier on another PR/ref), so neither bound is safe: rejected.
+  - Activity for `feat/3-todos`: `branch_creation 2026-11-25T18:28:39Z after=7f12f98` (head SHA), 1 s before
+    the first check suite. Activity for `ci/0-drift-artifact` (PR #5): pushes 13:04:54 (a4d1885), 13:18:48
+    (772a10d), 13:24:40 (0b5b106); PR #5 was labeled 13:10:52. Running the new gate-check on PR #5's real data
+    (`--base 05cc5d91 --head 0b5b106`, the API outputs as inputs) gives `FAIL framework-change-approved label is
+    older than the last change to protected files (... push of 772a10d at 13:18:48)` listing
+    `.github/workflows/drift.yml`, `roles/devops-cicd.md`: the S16 hole actually happened on PR #5 and is now caught.
+- **gate.yml:** new step "Read label time and push times (GitHub API, read only)" with `GH_TOKEN: github.token`
+  (no stored secret) writes `$RUNNER_TEMP/label-time` and `$RUNNER_TEMP/pushes`; the Gate step reads them into the
+  env vars and gets no token. API failure → warning and an empty file → gate-check FAILs if protected files changed
+  (AC20/AC24, fail closed). The activity read retries up to 6x10 s until the run's head SHA appears (the log can
+  lag the push). Kept: `pull_request_target` + all six types, base checkout with `persist-credentials: false`,
+  SHA-pinned checkout (no new action; `gh` is preinstalled on the runner), "Only PRs into main", head-SHA pin,
+  no PR code checked out or run. Permissions: `contents: read`, `pull-requests: read` (added).
+- **Known limits (for security / the person):**
+  - Fork PRs: the base repo has no activity for a fork's branch → protected changes from a fork can never pass
+    (fail closed, warning in the log). Fine for a single-account repo.
+  - Activity history length isn't documented; if the head push isn't found, it fails closed.
+  - Permission for issue events: the docs page states none; I chose `pull-requests: read`. If the read is refused
+    in CI, the gate fails closed with "label time could not be read" → then switch to `issues: read` (AC25 shows it).
+  - The label's actor isn't checked (only users with triage/write can label; GITHUB_TOKEN here is read-only).
+  - Same-second label and push count as stale (strictly later required).
+- **Verified:** hand-run scratch fixtures (temp dir, deleted) for AC2/4/5/6/7/8/9/11/12/17/18/19/21 and the
+  missing-label/missing-time paths: all gave the AC results. `bash scripts/verify.sh --no-db`:
+  `verify.sh: FAIL 1/15 failed: npm run test:e2e (1 skipped)`. Scope, migrations, secrets, typecheck, lint,
+  `npm run test`, build PASS; the only FAIL is `test:e2e`, which needs the local Supabase stack env
+  (NEXT_PUBLIC_SUPABASE_URL, ...) that `--no-db` doesn't start (environmental, unrelated to this diff).
+- **Left to do:** qa-test: tests AC1-AC24, AC26 in `tests/integration/`. Security gate, review. Full
+  `verify.sh` with the DB. After merge: AC25 (orchestrator with the person). This PR is judged by main's old gate
+  (merge main before running the gates; the person labels after the last protected push).
