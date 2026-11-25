@@ -30,7 +30,7 @@ Plus GitHub repository settings: branch protection, labels, merge settings.
 ## Outputs
 **Phase 0:**
 - `main` protected: PR required, 1+ approving review, required checks (`verify`, `db-check`, secret scan), no force-push, no deletion, linear history.
-- Labels: `destructive-approved`, `security`, `db`, `blocked`.
+- Labels: `destructive-approved`, `security`, `db`, `blocked`, `drift` (drift.yml opens issues with it).
 - `.github/pull_request_template.md` with: task id, brief link, verify.sh summary line, security rows covered, destructive yes/no, rollback note.
 - `CHANGELOG.md` (Keep a Changelog format) and `version` `0.1.0`.
 

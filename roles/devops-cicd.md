@@ -19,6 +19,14 @@ package-lock.json | pnpm-lock.yaml | yarn.lock
 .gitignore
 next.config.*         # security headers block only (content comes from security)
 .env.example          # names only, never values
+.npmrc
+tsconfig.json
+next-env.d.ts
+eslint.config.*
+vitest.config.*
+postcss.config.*
+# Phase 0 only: the one-off app scaffold (create-next-app, supabase init)
+# app/**, public/**, AGENTS.md, supabase/migrations/<init>, supabase/tests/<first test>
 ```
 
 ## Never touches

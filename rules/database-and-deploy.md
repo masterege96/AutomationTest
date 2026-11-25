@@ -51,10 +51,10 @@ and that gets fixed before the next deploy.
 
 ## Starting a new project (Phase 0)
 
-Run the template script (`new-supabase-project.ps1` on Windows; a bash
-equivalent is planned for Linux/macOS). It creates the migrations folder,
-migration #1, a first database test, the CI checks, the nightly drift check,
-`.gitattributes`, `.gitignore` and a setup checklist. **Connect the deployment
+No bootstrap script exists yet. git-release and devops-cicd do Phase 0 by hand from
+their contracts (`roles/git-release.md`, `roles/devops-cicd.md`): repo and branch
+protection, migrations folder, migration #1, a first database test, the CI checks,
+the nightly drift check, `.gitattributes` and `.gitignore`. **Connect the deployment
 (integration or CI job) before creating the first real table** (rule 14).
 `scripts/bootstrap-check.sh` must pass before any other role starts.
 

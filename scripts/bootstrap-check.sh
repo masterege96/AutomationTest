@@ -106,6 +106,14 @@ if [ -f package.json ]; then
   grep -q '"engines"' package.json && ok "package.json engines set" || bad "package.json engines set" "add \"engines\": {\"node\": \"<version>\"}"
   grep -q '"packageManager"' package.json && ok "packageManager pinned" || bad "packageManager pinned" "add \"packageManager\": \"pnpm@x.y.z\" (or npm/yarn)"
 
+  # verify.sh runs these; each must exist so "done" has a deterministic pass/fail.
+  MISSING_SCRIPTS=""
+  for s in typecheck lint test build; do
+    node -e "process.exit(require('./package.json').scripts?.['$s']?0:1)" 2>/dev/null || MISSING_SCRIPTS="$MISSING_SCRIPTS $s"
+  done
+  [ -z "$MISSING_SCRIPTS" ] && ok "npm scripts typecheck, lint, test, build exist" \
+    || bad "npm scripts missing:$MISSING_SCRIPTS" "add them to package.json#scripts (verify.sh runs them)"
+
   LOCK=""; for l in package-lock.json pnpm-lock.yaml yarn.lock bun.lockb bun.lock; do git ls-files --error-unmatch "$l" >/dev/null 2>&1 && LOCK="$l"; done
   if [ -n "$LOCK" ]; then ok "lockfile committed ($LOCK)"
   else bad "lockfile committed" "run your package manager install and commit the lockfile"; fi

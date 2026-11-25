@@ -2,7 +2,7 @@
 
 Every entry ends with a fix to a role contract, a rulebook or a script. A lesson without a fix stays open.
 
-## L1. verify.sh: CR check is a false FAIL on Windows Git Bash (open)
+## L1. verify.sh: CR check is a false FAIL on Windows Git Bash (fixed)
 
 - **Seen:** Task 0, 2026-11-25, Git Bash 5.2.37 (MSYS), Windows 11.
 - **Exact error:**
@@ -21,7 +21,7 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
   Same pattern for any future `$'\r'` inside `$( )`. Linux CI is not affected.
 - **Not changed here:** verify.sh is copied unmodified; local verify.sh shows this one false FAIL until the fix lands.
 
-## L2. verify.sh: SQL lint passes when the local database isn't running (open)
+## L2. verify.sh: SQL lint passes when the local database isn't running (fixed)
 
 - **Seen:** Task 0, first verify.sh run. `supabase start` had failed (port clash, L3), `db reset` and
   `test db` failed, but `SQL lint (no errors)` was PASS.
@@ -30,7 +30,7 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
 - **Suggested fix (scripts/verify.sh):** use the exit code, `$SB db lint --level error --fail-on error`
   (flag exists in CLI 3.2.0), and FAIL when it exits non-zero. ci.yml `db-check` already does this.
 
-## L3. verify.sh hides why `supabase start` failed; local port clash with another project (open)
+## L3. verify.sh hides why `supabase start` failed; local port clash with another project (fixed)
 
 - **Seen:** Task 0. Another local Supabase project (`ramoerp`) was running on the default ports
   54320-54329. verify.sh writes the `supabase start` output to /tmp/verify-db.log, then `db reset`
@@ -56,7 +56,7 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
 - **Follow-up:** qa-test removes `--passWithNoTests` in the first feature task that adds a unit test,
   so an accidentally empty suite can't pass. Suggested framework fix: roles/qa-test.md "Done when" item.
 
-## L6. Framework gaps found while bootstrapping (open)
+## L6. Framework gaps found while bootstrapping (fixed)
 
 - `rules/database-and-deploy.md` "Starting a new project" refers to `new-supabase-project.ps1`, which
   isn't in the framework. Fix: remove the reference or add the script.
@@ -78,7 +78,7 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
 - Supabase CLI 3.4.0 is out; 3.2.0 is pinned (matches the framework docs). Upgrade only deliberately.
 - create-next-app 16.4.6 still scaffolds ESLint 9 (npm marks 9.39.5 deprecated). Kept; upgrading is a separate, deliberate change.
 
-## L8. verify.sh: gitleaks step always FAILs in CI, because `-q` isn't a gitleaks flag (open, blocks a green `verify`)
+## L8. verify.sh: gitleaks step always FAILs in CI, because `-q` isn't a gitleaks flag (fixed)
 
 - **Seen:** first CI run on `main`, run 45598529613, job `verify`, gitleaks 8.30.1.
 - **Exact output:**
@@ -110,3 +110,17 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
 - **Options for the person:** add a second GitHub account/collaborator as reviewer; or set required
   reviews to 0 and rely on required checks plus the code-reviewer role's `review.md`; record the choice in
   `tasks/decisions.md` and in roles/git-release.md.
+
+## Fixes applied (2026-11-25, branch `ci/0-phase0-fixes`, the person approved via the coordinator)
+
+Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\agent-team-framework`):
+
+- **L1:** verify.sh uses `CR=$(printf '\r')` and `grep -lU "$CR"`.
+- **L2 + L3:** verify.sh appends start, db reset, test db and db lint to one log (path printed). A failed
+  `supabase start` is its own FAIL ("local database could not start", log tail, Docker/port hint) and the
+  other DB steps are skipped. SQL lint is `db lint --level error --fail-on error`, judged by exit code.
+- **L6:** roles/devops-cicd.md and roles/README.md give devops-cicd the tooling configs and the Phase 0
+  scaffold; roles/git-release.md lists the `drift` label; rules/database-and-deploy.md says no bootstrap
+  script exists yet. bootstrap-check.sh checks that the npm scripts typecheck, lint, test, build exist.
+- **L8:** verify.sh runs `gitleaks detect --no-banner --redact --log-level error`; exit 0 PASS, exit 1
+  "found secrets" with the output tail, any other exit "could not run (exit N)".
