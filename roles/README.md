@@ -34,7 +34,7 @@ Each path has exactly one owner. Override paths in `PROJECT_CONTEXT.md`
 | `app/api/**`, `lib/server/**`, `supabase/functions/**`, `middleware.ts`, `types/database.ts` (generated) | backend-dev |
 | `app/**` (except `app/api/**`), `components/**`, `lib/client/**`, `public/**`, `styles/**` | frontend-dev |
 | `tests/integration/**`, `tests/e2e/**`, `tests/abuse/**`, `playwright.config.*` | qa-test |
-| `.github/workflows/**`, `scripts/**`, `supabase/config.toml`, `.nvmrc`, `package.json` (engines, packageManager, scripts, devDependencies), lockfile, `.gitattributes`, `.gitignore`, `next.config.*` headers block | devops-cicd |
+| `.github/workflows/**`, `scripts/**`, `supabase/config.toml`, `.nvmrc`, `package.json` (engines, packageManager, scripts, devDependencies), lockfile, `.gitattributes`, `.gitignore`, `.npmrc`, tooling configs (`tsconfig.json`, `next-env.d.ts`, `eslint.config.*`, `vitest.config.*`, `postcss.config.*`), `next.config.*` headers block; in Phase 0 only, the one-off app scaffold (`app/**`, `public/**`, `AGENTS.md`, first migration and DB test) | devops-cicd |
 | Colocated unit tests (`*.test.ts` next to the code) | the role that owns the code |
 | `package.json` `dependencies` | the role that needs it, with approval in the brief (AGENT_RULES §8) |
 | `rules/**`, `roles/**`, `ORCHESTRATOR.md` | the person only |

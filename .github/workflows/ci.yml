@@ -1,11 +1,10 @@
 name: ci
 
-# Required checks on main: verify, db-check, secrets (job names must not change).
+# Required checks on main: verify, db-check, secrets, gate (job names must not change).
+# Pull requests only: verify.sh needs a task branch (<type>/<id>-<name>) for its scope check.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
@@ -99,3 +98,18 @@ jobs:
 
       - name: gitleaks (full history)
         run: gitleaks detect --source . --redact --no-banner --verbose
+
+  # Merge approval for a single-account repo (replaces GitHub's approving review):
+  # specs/<id>/security-gate.md says "Result: PASS" and specs/<id>/review.md says "Result: APPROVE",
+  # both committed after the last code change. See ORCHESTRATOR.md "Merge approval".
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gate-check.sh needs the merge-base with origin/main
+
+      - name: gate-check.sh
+        run: bash scripts/gate-check.sh

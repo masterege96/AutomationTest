@@ -19,6 +19,14 @@ package-lock.json | pnpm-lock.yaml | yarn.lock
 .gitignore
 next.config.*         # security headers block only (content comes from security)
 .env.example          # names only, never values
+.npmrc
+tsconfig.json
+next-env.d.ts
+eslint.config.*
+vitest.config.*
+postcss.config.*
+# Phase 0 only: the one-off app scaffold (create-next-app, supabase init)
+# app/**, public/**, AGENTS.md, supabase/migrations/<init>, supabase/tests/<first test>
 ```
 
 ## Never touches
@@ -37,6 +45,7 @@ next.config.*         # security headers block only (content comes from security
    - `verify`: install with the lockfile, run `scripts/verify.sh` with `CI=true`; sets `DESTRUCTIVE_APPROVED=1` only when the PR has the `destructive-approved` label.
    - `db-check`: `supabase start`, `supabase db reset`, `supabase test db`, `supabase db lint` (also run inside verify.sh; this job is the explicit required check).
    - `secrets`: gitleaks on the full history.
+   - `gate`: `scripts/gate-check.sh` (checkout with `fetch-depth: 0`): merge approval from `specs/<id>/security-gate.md` and `review.md` (ORCHESTRATOR.md "Merge approval").
 4. **Deploy** on push to `main`, from the same commit:
    - Supabase-hosted: GitHub integration "Deploy to production" ON for `main`, written in `PROJECT_CONTEXT.md` as `Deploy path: Supabase GitHub integration`.
    - Self-hosted / plain Postgres: `db push --dry-run` (logged), backup (`pg_dump`, stored off-server), `db push`, then app deploy. GitHub Environment `production` with required approval.

@@ -34,7 +34,7 @@ No task leaves `BACKLOG` until `scripts/bootstrap-check.sh` exits 0.
 While it fails, only git-release and devops-cicd may work, and only on Phase 0.
 Phase 0 is done when:
 
-- the git repo exists with a remote, and `main` is protected (required PR review and required checks)
+- the git repo exists with a remote, and `main` is protected (PR required; required checks `verify`, `db-check`, `secrets`, `gate`; see "Merge approval")
 - CI runs `scripts/verify.sh` on every PR, and the `db-check` job builds the DB from scratch
 - the deploy path is connected (Supabase integration or CI deploy job) **before the first real table**
 - the nightly drift check workflow exists
@@ -59,6 +59,22 @@ BACKLOG → SPEC_READY → IN_PROGRESS → IN_REVIEW → VERIFYING → DONE
 | `VERIFYING` | Merged, waiting for production proof | orchestrator | Security gate PASS, review APPROVE, required CI checks green, PR merged |
 | `DONE` | Proven in production | orchestrator only | `post-deploy.md`: migrations in production history, drift check green, feature tested as a real user |
 | `BLOCKED` | Can't continue without something | any role | A `Blocked` entry: what's missing, who must provide it |
+
+## 3a. Merge approval
+
+GitHub's required review count on `main` is **0**. Approval is the required `gate`
+CI check (`scripts/gate-check.sh`), which passes only when, for the task named by the
+branch (`<type>/<id>-<name>`):
+
+- `specs/<id>/security-gate.md` has a line `Result: PASS`
+- `specs/<id>/review.md` has a line `Result: APPROVE`
+- both files were committed in a later commit than the last code change on the branch,
+  so a review can't approve code that changed afterwards. Any new code commit means both
+  gates run again, each in its own commit.
+
+**security** and **code-reviewer** each run in a fresh agent context, never the
+builder's, and never each other's. They read the repo and the brief, not the builder's
+conversation.
 
 ## 4. Bounce-back rules
 

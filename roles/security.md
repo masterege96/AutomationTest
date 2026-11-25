@@ -31,7 +31,7 @@ Proposals for `rules/security-baseline.md` go to the person; it doesn't edit rul
 - Auth rules: which routes need login, which need a role, session handling.
 - Sign-off on db-architect's RLS: "matches / changes needed: …".
 
-**`security-gate.md` (Gate):** `PASS` or `FAIL`, then per applicable row:
+**`security-gate.md` (Gate):** the first line is exactly `Result: PASS` or `Result: FAIL` (the `gate` CI check reads it), then per applicable row:
 - control present (file and line), abuse test present (test name), abuse test result.
 - Automated results: secret scan, `npm audit --audit-level=high` (or the package manager's equivalent), Supabase security advisors (read-only), RLS check from verify.sh.
 - Manual review of the diff for: server-side authorization on every new route, client-trusted values, raw SQL from strings, `dangerouslySetInnerHTML`, new env vars reaching the client, LLM output used without checks, uploads.

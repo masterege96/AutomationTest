@@ -77,6 +77,9 @@ if [ -n "$BRIEF" ]; then
       OUT=""
       for f in $CHANGED; do
         case "$f" in tasks/*) continue ;; esac   # task briefs and handoff notes are always allowed
+        # this task's gate reports (written by security, code-reviewer, git-release) are always allowed
+        TID=$(printf '%s' "$BRIEF" | sed -nE 's#^tasks/([^/]+)/TASK_BRIEF\.md$#\1#p')
+        case "$f" in "specs/$TID/security-gate.md"|"specs/$TID/review.md"|"specs/$TID/post-deploy.md") [ -n "$TID" ] && continue ;; esac
         match=0
         while IFS= read -r g; do
           case "$g" in
@@ -113,7 +116,9 @@ if [ -d supabase ]; then
     skip "deployed-migration check (base branch $BASE not found)" required
   fi
 
-  CRFILES=$(grep -lU $'\r' "$MIG_DIR"/*.sql 2>/dev/null || true)
+  # $'\r' inside $( ) is dropped by Git Bash on Windows, which turns the grep into "match everything".
+  CR=$(printf '\r')
+  CRFILES=$(grep -lU "$CR" "$MIG_DIR"/*.sql 2>/dev/null || true)
   [ -z "$CRFILES" ] && ok "no CR (Windows) line endings in migrations" \
     || bad "CR line endings in migrations" "$CRFILES"$'\n'"Fix: git add --renormalize . (with .gitattributes eol=lf)"
 
@@ -147,8 +152,12 @@ TRACKED_ENV=$(git ls-files | grep -E '(^|/)\.env($|\.)' | grep -vE '\.env\.examp
 [ -z "$TRACKED_ENV" ] && ok "no .env files tracked" || bad ".env file tracked: $TRACKED_ENV" "STOP. Secret exposed: tell the person to rotate keys. Don't rewrite history yourself."
 
 if command -v gitleaks >/dev/null 2>&1; then
-  if gitleaks detect --no-banner --redact -q >/dev/null 2>&1; then ok "gitleaks: no secrets in repo history"
-  else bad "gitleaks found secrets" "Run: gitleaks detect --redact  (then STOP and tell the person)"; fi
+  GL_OUT=$(gitleaks detect --no-banner --redact --log-level error 2>&1); GL_RC=$?
+  case "$GL_RC" in
+    0) ok "gitleaks: no secrets in repo history" ;;
+    1) bad "gitleaks found secrets" "$(printf '%s\n' "$GL_OUT" | tail -20)"$'\n'"STOP and tell the person. Don't rewrite history yourself." ;;
+    *) bad "gitleaks could not run (exit $GL_RC)" "$GL_OUT" ;;
+  esac
 else
   PATTERNS='(sk_live_[0-9a-zA-Z]{10,}|sk_test_[0-9a-zA-Z]{10,}|sk-ant-[a-zA-Z0-9_-]{20,}|sk-[a-zA-Z0-9]{32,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|postgres(ql)?://[^:@/[:space:]]+:[^@/[:space:]]+@)'
   HITS=""
@@ -219,14 +228,28 @@ if [ -d supabase ]; then
     skip "database build from scratch (Supabase CLI not installed)" required
   else
     SB="supabase"; command -v supabase >/dev/null 2>&1 || SB="npx --no-install supabase"
-    if ! $SB status >/dev/null 2>&1; then $SB start >/tmp/verify-db.log 2>&1 || true; fi
-    if $SB db reset >/tmp/verify-db.log 2>&1; then ok "all migrations apply to an empty database"
-    else bad "migrations don't apply to an empty database" "$(tail -20 /tmp/verify-db.log)"; fi
-    if $SB test db >/tmp/verify-dbtest.log 2>&1; then ok "database tests (supabase test db)"
-    else bad "database tests" "$(tail -20 /tmp/verify-dbtest.log)"; fi
-    LINT=$($SB db lint --level error 2>&1 || true)
-    if printf '%s' "$LINT" | grep -qiE '"level":[[:space:]]*"error"|^error'; then bad "SQL lint" "$(printf '%s' "$LINT" | tail -20)"
-    else ok "SQL lint (no errors)"; fi
+    # One log for every DB step, appended, so the real cause of a failure is never overwritten.
+    DB_LOG="${TMPDIR:-/tmp}/verify-db.log"
+    : > "$DB_LOG"
+    echo "  (database log: $DB_LOG)"
+    db_step() { echo "===== $* =====" >>"$DB_LOG"; $SB "$@" >>"$DB_LOG" 2>&1; }
+    DB_UP=1
+    if ! $SB status >/dev/null 2>&1; then
+      if ! db_step start; then
+        DB_UP=0
+        bad "local database could not start" "$(tail -20 "$DB_LOG")"$'\n'"Check that Docker is running and that no other project uses the ports in supabase/config.toml (docker ps)."
+      fi
+    fi
+    if [ "$DB_UP" = 1 ]; then
+      if db_step db reset; then ok "all migrations apply to an empty database"
+      else bad "migrations don't apply to an empty database" "$(tail -20 "$DB_LOG")"; fi
+      if db_step test db; then ok "database tests (supabase test db)"
+      else bad "database tests" "$(tail -20 "$DB_LOG")"; fi
+      if db_step db lint --level error --fail-on error; then ok "SQL lint (no errors)"
+      else bad "SQL lint" "$(tail -20 "$DB_LOG")"; fi
+    else
+      skip "migrations, database tests and SQL lint (local database not running)"
+    fi
   fi
 fi
 
