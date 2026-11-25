@@ -488,3 +488,13 @@ the output line prefixes and rule 3 are unchanged.
   push that changed the branch's net protected diff (same-second ties fail closed). Commits 4982db9, fcaa7f3.
 - Next: qa-test regression tests (legit, A, B, intermediate differing push, unknown tip, same-second tie), full
   verify.sh, then both gates again in fresh contexts.
+
+### qa-test, 2026-11-25 (F1 regression tests)
+
+- `4091079`: 7 regression tests in `tests/integration/gate-check.test.ts` for the F1 fix (`4982db9`), using the fixture steps
+  from the devops-cicd F1 entry. Legit label after GS2: PASS. Variant A and variant B: label-older FAIL listing
+  `scripts/evil.sh`, then PASS after a later re-label. Intermediate differing push: FAIL at 10:05, PASS at 10:25.
+  Unknown tip in between: FAIL. Same-second tie, both orders: push time could not be read. The tests also check that
+  the label lines name the push (`tip <sha> at <time>`). Existing tests unchanged.
+  `npx vitest run tests/integration/gate-check.test.ts`: 85 passed (85). It took 939 s because another session's
+  4d `verify.sh` was using the machine at the same time.
