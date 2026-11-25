@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: "17 3 * * *" # nightly, 03:17 UTC
   workflow_dispatch:
+    inputs:
+      upload_diff:
+        description: "Upload the raw diff.sql as a 1-day artifact (public repo: anyone can download it until it is deleted)"
+        type: boolean
+        default: false
   # After each deploy: add a workflow_run trigger on the deploy workflow once the deploy path exists.
 
 permissions:
@@ -26,6 +31,7 @@ jobs:
     timeout-minutes: 30
     env:
       DRIFT_SCHEMAS: public
+      GITLEAKS_VERSION: 8.30.1 # same pin as ci.yml
     # Secrets are given only to the steps that need them (not to npm ci or other steps).
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -73,6 +79,8 @@ jobs:
           if ! npx --no-install supabase db diff --remote --schema "$DRIFT_SCHEMAS" >diff.sql 2>diff.err; then
             echo "::error::supabase db diff did not run"; tail -20 diff.err; exit 1
           fi
+          # The CLI exited 0, so diff.sql is complete (S29: only a complete diff may be uploaded).
+          echo "diff_ok=true" >> "$GITHUB_OUTPUT"
           # Judge on content: anything other than blank lines and SQL comments is drift.
           CHANGED_LINES=$(grep -cvE '^[[:space:]]*(--.*)?$' diff.sql || true)
           echo "diff: $CHANGED_LINES non-comment lines, sha256 $(sha256sum diff.sql | cut -c1-12)"
@@ -84,6 +92,38 @@ jobs:
           fi
           echo "drift=no" >> "$GITHUB_OUTPUT"
           echo "No drift."
+
+      # Manual opt-in only (upload_diff=true, the person's choice): the schedule and the default dispatch
+      # never expose the diff. Upload only a complete diff (CLI exit 0, S29) that gitleaks finds clean (S28).
+      # Whoever triggers it must delete the artifact right after downloading.
+      - name: Install gitleaks (pinned, checksum verified; manual opt-in only)
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true'
+        run: bash scripts/ci/install-gitleaks.sh "$GITLEAKS_VERSION"
+
+      - name: Secret scan of the diff before upload
+        id: scan
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true'
+        run: |
+          SCAN_DIR=$(mktemp -d)
+          cp diff.sql "$SCAN_DIR/"
+          set +e
+          gitleaks detect --no-git --source "$SCAN_DIR" --redact --no-banner --log-level error --exit-code 99 >/dev/null 2>&1
+          RC=$?
+          set -e
+          case "$RC" in
+            0) echo "clean=true" >> "$GITHUB_OUTPUT"; echo "gitleaks: diff.sql clean" ;;
+            99) echo "::error::possible secret in production schema, not uploaded"; exit 1 ;;
+            *) echo "::error::gitleaks could not run (exit $RC), diff not uploaded"; exit 1 ;;
+          esac
+
+      - name: Upload the raw diff (manual opt-in only)
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true' && steps.scan.outputs.clean == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: drift-diff
+          path: diff.sql
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Open or update the drift issue
         if: failure() && steps.diff.outputs.drift == 'yes'

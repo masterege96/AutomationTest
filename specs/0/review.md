@@ -1,58 +1,73 @@
 Result: APPROVE
 
-# Code review: task 0, PR #3 (gate cleanup)
+# Code review: task 0, drift artifact (`ci/0-drift-artifact`), re-run after the main merge
 
 - **Reviewer:** code-reviewer (fresh context, no builder conversation; judged from the repo only)
 - **Date:** 2026-11-25
-- **Branch / HEAD reviewed:** `ci/0-gate-cleanup` @ `27b7b64` (code commit `ece4704`, security gate `27b7b64`), diff `git diff origin/main...HEAD` excluding `specs/0/security-gate.md` (7 files)
-- **Security gate:** `specs/0/security-gate.md` = PASS, committed in `27b7b64` after the last code commit `ece4704`. Read; this review was done independently.
+- **Branch / HEAD reviewed:** `ci/0-drift-artifact` @ `b4614f8` (security gate) on top of `772a10d` (merge of `origin/main` @ `05cc5d9`, PR #3). Merge-base with `origin/main` = `05cc5d9` = `origin/main`.
+- **Why re-run:** the merge commit counts as a code change, so the previous review (`b228e84`, APPROVE, nits N1-N3, N5, N6) no longer counts.
+- **Security gate:** `specs/0/security-gate.md` = PASS (`b4614f8`, after the merge). Read; this review was done independently.
+- **Decision implemented:** `tasks/decisions.md:12` (repo stays public; a manual run with `upload_diff=true` may upload the raw diff as a 1-day artifact; schedule and default runs never expose it).
 
 ## Verdict
 
-The PR does what it claims: the temporary in-PR `gate` job is gone, `merge-gate` (gate.yml, from main) is
-the only approval check, and the other changes are comments and docs. No blockers. One should-fix (the
-brief's Handoff/Blocked sections weren't updated for PR #3) and some nits; none needs another round.
+The merge is clean and changes nothing in the PR's own code: `drift.yml` is byte-identical to what
+`b228e84` approved, both conflict resolutions keep both sides, and PR #3's changes (removal of the
+temporary in-PR `gate` job, comments in `gate.yml` and `gate-check.sh`, item-3 wording in
+`roles/devops-cicd.md`) do not touch anything drift.yml or its docs rely on. The drift.yml analysis
+from `b228e84` (step order, conditions, gitleaks exit-code handling, failure-path table) still holds.
+No blockers, no should-fix.
 
-## What was checked
+## Merge check
 
-| Claim | Evidence | Result |
+| Check | Evidence | Result |
 |---|---|---|
-| `gate` job removed from ci.yml, nothing depends on it | `ci.yml` diff removes lines 102-120 only; no `needs:` anywhere refers to `gate` | OK |
-| Workflow YAML parses, job names the docs rely on unchanged | js-yaml (node_modules): ci.yml jobs `verify, db-check, secrets`, trigger `pull_request` unchanged; gate.yml `merge-gate`, `pull_request_target` incl. `edited`; drift.yml `drift`. Matches ORCHESTRATOR 3a (`:83-85`), brief AC5/AC8, roles/devops-cicd.md:45-48 | OK |
-| ci.yml header accurate | `ci.yml:3-4` lists `verify, db-check, secrets` + `merge-gate`, notes the old `gate` job's removal and why | OK |
-| gate.yml change is comment-only | `gate.yml:31-32` are `#` lines; the fetch step is unchanged | OK |
-| gate-check.sh change is comment-only and the header now matches the code | Diff touches only `#` lines 5-12; `bash -n` OK. First non-empty line (`:40-43`), no merge-base = FAIL (`:50-52`), later-commit freshness (`:54-60`), protected paths + `FRAMEWORK_CHANGE_APPROVED=1` (`:64-76`) all as described. Small omissions: see N7 | OK |
-| roles/devops-cicd.md `--head` wording | `:48` now says fetched to `refs/pr/head`, checked against and passed as `--head "$HEAD_SHA"`; matches `gate.yml:38-41`, `:48` | OK |
-| Brief Branch field | `TASK_BRIEF.md:7` lists `main` (first two commits) and the three PR branches | OK |
-| S14 decision recorded | `tasks/decisions.md:12`, same form as the other person decisions, names both variants and the planned fix | OK |
-| L11 link, L12 | `lessons.md:139` links the decision; L12 at `:159-171` | OK (see N6, N8) |
-| L12 CLI claim | `npx --no-install supabase --version` = 3.2.0; `supabase link --help`: argument "Project ref, or the name (or UUID) of a branch of the currently linked project. Values that are exactly 20 lowercase letters are always treated as project refs"; `--project-ref` "Project ref ... or the name of one of its branches". drift.yml:63 passes the secret as `--project-ref`. The quoted error lists `SUPABASE_PROJECT_ID` among the sources it checked, which supports "the CLI also reads it from the environment" | OK (wording, N8) |
-| Scope | verify.sh scope check PASS; every changed file is in the brief's allowed paths or `tasks/**` / this task's gate files | OK |
-| verify.sh | `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker): `verify.sh: PASS 18/18 (1 skipped)` | OK |
+| PR net change | `git diff --stat origin/main...HEAD`: `.github/workflows/drift.yml` (+40), `roles/devops-cicd.md` (1 line, item 5), `tasks/decisions.md` (+1 row), `specs/0/review.md`, `specs/0/security-gate.md`. Nothing else. | OK |
+| drift.yml unchanged since last review | `git diff b228e84 HEAD -- .github/workflows/drift.yml`: empty | OK |
+| What the merge brought in | `git diff b228e84 HEAD --stat`: `ci.yml`, `gate.yml`, `roles/devops-cicd.md`, `scripts/gate-check.sh`, `tasks/0/TASK_BRIEF.md`, `tasks/decisions.md`, `tasks/lessons.md` (all PR #3 = `05cc5d9`), plus `specs/0/security-gate.md` (the new gate). | OK |
+| `tasks/decisions.md` | net change vs main is exactly one added row (`:12`, drift artifact); main's S14 row kept (`:13`). See N7 for order. | OK |
+| `roles/devops-cicd.md` | `:48` has PR #3's item-3 `merge-gate` wording (`--head "$HEAD_SHA"`); `:53` has the branch's item-5 upload paragraph. Only item 5 differs from main. | OK |
+| Conflict markers | `grep -rn '^<<<<<<<\|^=======$\|^>>>>>>>'` over the repo (excl. `.git`, `node_modules`): none. `git diff --check origin/main...HEAD`: clean. | OK |
+| `specs/0/*` | branch's files kept; security gate re-run after the merge, this file rewritten after it. Each has exactly one `Result:` line, on line 1. | OK |
 
-## Previous review nits (PR #2 review, N1-N5)
+## PR #3 interaction with drift.yml and the docs
 
-| Nit | Status |
-|---|---|
-| N1 `roles/devops-cicd.md:48` `--head refs/pr/head` vs `"$HEAD_SHA"` | Fixed, wording matches gate.yml |
-| N2 `scripts/gate-check.sh` header semantics | Fixed (first non-empty line, merge-base FAIL, label); two small gaps left, N7 |
-| N3 `ci.yml:3` required-checks header | Fixed; the job is gone and the header says so |
-| N4 brief Branch field | Fixed |
-| N5 gate.yml credential-less fetch comment | Fixed (`gate.yml:31-32`) |
+| PR #3 change | Effect on this PR | Result |
+|---|---|---|
+| `ci.yml`: in-PR `gate` job removed, header comment +1 line | No drift reference. `GITLEAKS_VERSION: 8.30.1` now at `ci.yml:19` (was `:18`), value unchanged, so `drift.yml:34` "same pin as ci.yml" still true. Same installer `scripts/ci/install-gitleaks.sh` (`ci.yml:43, 98`), not changed by PR #3. `ci.yml:101` still uses `gitleaks detect`, matching `drift.yml:110` (N5). | OK |
+| `gate.yml`: comment only (credential-less fetch works because the repo is public) | Consistent with `tasks/decisions.md:12` (repo stays public). No behavior change. | OK |
+| `scripts/gate-check.sh`: header comment only (first non-empty line rule, framework label) | Both gate files start with their `Result:` line; this PR touches `.github/workflows` and `roles`, so it needs `framework-change-approved`. | OK |
+| `roles/devops-cicd.md` item 3 | Different paragraph from item 5; no overlap. | OK |
+| `tasks/0/TASK_BRIEF.md`, `tasks/lessons.md` | Docs only; brief's allowed paths still cover this PR's files (verify.sh scope check passes). | OK |
+
+## Other checks
+
+| Check | Evidence | Result |
+|---|---|---|
+| YAML parses | js-yaml (node_modules): `ci` jobs `verify,db-check,secrets`; `gate` job `merge-gate`; `drift` job `drift`, 10 steps: 5 `diff` (id `diff`), 6 install gitleaks, 7 scan (id `scan`), 8 upload, 9 issue; `if:` expressions on 6-9 as approved in `b228e84` | OK |
+| verify.sh | `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker): `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script) | OK |
+| Docs match behavior | `roles/devops-cicd.md:53` and `drift.yml:96-98` agree with `drift.yml:79-126` (diff_ok after CLI exit 0, gitleaks clean, message at `:115`, 1-day retention, delete after download) | OK |
 
 ## Findings
 
-No `blocker`.
+No `blocker`, no `should-fix`. N1-N3, N5, N6 carried from `b228e84` (code unchanged); N7 new.
 
 | # | File:line | Severity | What is wrong | Owner |
 |---|---|---|---|---|
-| F1 | `tasks/0/TASK_BRIEF.md:95`, `:100` | should-fix | No Handoff entry for PR #3 (AGENT_RULES 24: changed files, what was verified, what's left). "Left to do" still says "After PR #2 merges: a tiny PR removing the temporary `gate` job", which this PR is. Blocked item 2 (green drift run) doesn't mention it now fails at `supabase link` (L12), and item 5 (decide L11 risks) doesn't say S14 is accepted for the pilot (decisions.md:12). Append a PR #3 handoff entry and update those Blocked items. Doesn't block merge; do it in this PR or the next task-0 PR. | git-release / devops-cicd |
-| N6 | `tasks/lessons.md:139-140`, `:151` | nit | L11's S14 line still ends "Suggested: ... or the person accepts the risk" although it is now accepted; the "S14 second variant" bullet (`:151`) isn't marked accepted, though decisions.md:12 covers it. One "(accepted, see S14 above)" would avoid a reader thinking it's still open. | devops-cicd |
-| N7 | `scripts/gate-check.sh:8-9` | nit | Header says "the last code change" without saying `tasks/**` commits don't count as code (`:54` excludes them, the known S5 gap); it also doesn't mention that a bold `**Result:** PASS` first line is accepted (`:42`). Worth half a line each so the header is complete. | devops-cicd |
-| N8 | `tasks/lessons.md:163-164` | nit | "treats ... anything else as a branch name" goes slightly further than `link --help`, which only says 20-lowercase-letter values are always project refs (other values may be a ref or a branch). The diagnosis and fix stand: the error shows the value was resolved as a branch. Suggest "treats ... as a project ref; other values can be read as a branch name". | devops-cicd |
+| N1 | `.github/workflows/drift.yml:135` | nit | Issue body says "The run log shows only a line count and hash" and points db-builder at a local `db diff`; a manual `upload_diff=true` run (gitleaks-checked) is the other way to see the diff. Optional one-line mention, still never pasting the diff. | devops-cicd |
+| N2 | `.github/workflows/drift.yml:103-117` | nit | On a no-drift opt-in run, a gitleaks hit, a gitleaks error or an upload failure turns the run red with no issue. The error lines say why and a manual run has someone watching, so fine; but a hit means a secret-looking string sits in the production schema, worth following up by hand even with no drift. | devops-cicd |
+| N3 | `.github/workflows/drift.yml:123` | nit | Fixed artifact name `drift-diff` with the default `overwrite: false`; unverified whether "Re-run failed jobs" conflicts with the first attempt's artifact. If it does, the re-run's upload fails (closed, harmless); `overwrite: true` would avoid it. | devops-cicd |
+| N5 | `.github/workflows/drift.yml:110` | nit | `gitleaks detect --no-git --source` is the legacy form (current: `gitleaks dir`). Works in the pinned 8.30.1 and matches `ci.yml:101`; revisit when the pin is bumped. | devops-cicd |
+| N6 | `.github/workflows/drift.yml:110, 116` | nit | All gitleaks output goes to `/dev/null`, so "gitleaks could not run (exit N)" gives only the exit code to debug from. Deliberate (public log, S18) and fails closed; noting it so a future fix does not just drop the redirect. | devops-cicd |
+| N7 | `tasks/decisions.md:12-13` | nit | The file says "Newest last", but the merge put the drift-artifact row before main's S14 row, which landed on main first. Same date, so harmless; if order matters, move `:12` below `:13` in a later docs change (not worth a re-gate now). | git-release |
 
-## Before / after merge (not review findings)
+## Carried
 
-- The person adds `framework-change-approved` (this PR changes `.github/workflows`, `scripts`, `roles`).
-- If branch protection on `main` still lists `gate` as a required check, the person removes it (security's note too): no workflow produces it any more. Not checked here; GitHub settings are out of scope.
-- L12: the person fixes the `SUPABASE_PROJECT_ID` environment secret; then one green drift run on main (Blocked item 2).
+Security items from the PR #2 gates (S14, S5, S15, S16, S19, S20/S21, S23, S24, S26, S27) are
+unchanged by this PR. S14 is now recorded as accepted for the pilot (`tasks/decisions.md:13`). S19
+(nothing verifies the `production` environment's main-only policy) also guards this artifact path.
+
+## Before merge
+
+The person adds `framework-change-approved` (this PR changes `.github/workflows/drift.yml` and
+`roles/devops-cicd.md`).
