@@ -2,8 +2,8 @@
 
 - **Date:** 2026-11-25 (20:50 UTC)
 - **Task:** 4d (bootstrap-check S19 finding)
-- **Who:** the person
-- **Source:** the project thread, relayed by the coordinator
+- **Who:** the person, in their own words (project thread, 20:50:41 UTC): "We can do that after we are done"
+- **Source:** the project thread (the person's message above; the conditions below were relayed by the coordinator)
 - **Status:** open until a later decision file contains the line `Closes decision: 2026-11-25-4d-supabase-secrets-accepted-until-step4.md`; at the latest before task 4i (template packaging) starts
 
 ## Decision
