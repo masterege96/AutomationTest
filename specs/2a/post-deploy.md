@@ -19,13 +19,14 @@ Read-only `list_migrations` (Supabase connector, project AutomationTests), 2026-
 
 ## Drift after deploy (AC8)
 
-- Run 45647204820 (`workflow_dispatch`, `main` at `9f742a9`, 15:37 UTC): success.
+- Run 45647204820 (`workflow_dispatch`, `main` at `9f742a9`, 15:37 UTC): success, log
+  `diff: 0 non-comment lines, sha256 e3b0c44298fc` (empty diff), "No drift.", no artifact.
 - Run 45651393581 (`workflow_dispatch`, `main` at `af59b2d`, 16:09 UTC): success, log
   `diff: 0 non-comment lines, sha256 e3b0c44298fc` (empty diff), "No drift.", no artifact.
 - Per `specs/2a/schema.md` section 7, the diff engine very likely compares the global default-ACL row as well, but
   that is not proven by a run, so AC8 does **not** rest on the drift check alone.
 
-## Required read-only production check (AC8, schema.md section 7): OPEN, the person
+## Required read-only production check (AC8, schema.md section 7): PASS, run by the person
 
 Agents may not run SQL against production, not even a `SELECT` (`rules/database-and-deploy.md` rule 4 forbids
 `execute_sql` there), so this item is the person's. In the Supabase dashboard SQL editor, run only these two
@@ -47,16 +48,26 @@ order by 1;
 Security's rule: any per-schema row other than `public` and `storage`, or a `storage` row that differs from local
 (`{postgres=X, anon=X, authenticated=X, service_role=X}`), goes to security before the task is marked done.
 
+### Result of the check (the person, 2026-11-25 ~16:30 UTC, dashboard SQL editor, SELECT only)
+
+Relayed to git-release by the orchestrator from the person's screenshots:
+
+- **Query 1** (global, `defaclnamespace = 0`): exactly one row, `postgres | f | {postgres=X/postgres}`. Matches the expected value.
+- **Query 2** (per-schema, `postgres`, functions): `public | {postgres=X/postgres}` and `storage | {postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}`; no other schema. `public` is as expected; `storage` matches local.
+
+Security's rule is met (no row other than `public` and `storage`, and `storage` matches local), so nothing goes to
+security.
+
 ## Acceptance criteria
 
 - AC1-AC7: proven before merge (pgTAP `supabase/tests/02_function_privileges_test.sql` in CI `db-check`, security
   gate PASS, review APPROVE; see `tasks/2a/TASK_BRIEF.md`).
 - AC8: migration in production history **yes**; default drift run green **yes**; read-only `pg_default_acl`
-  check **open (the person)**.
+  check **PASS** (run by the person 2026-11-25 ~16:30 UTC, rows above).
 - No user-facing feature: the behavior (anon/authenticated can't call new functions without an explicit grant) is
   proven by the pgTAP test, not by a real-user action.
 
 ## Result
 
-**VERIFYING** until the person records the two query results above and they match (or security signs off on a
-difference). Then the orchestrator moves 2a to `DONE`.
+**DONE.** Migration in production history, drift green on the diff content, and the read-only `pg_default_acl`
+check matches (run by the person, 2026-11-25). Nothing open.
