@@ -9,6 +9,9 @@ on:
     types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 permissions:
   contents: read
+  # Read-only, for the framework-change-approved 'labeled' time (issue events of the PR).
+  # The push times come from the repository activity API, which needs only metadata (always granted).
+  pull-requests: read
 concurrency:
   group: merge-gate-${{ github.event.pull_request.number }}
   cancel-in-progress: true
@@ -39,10 +42,51 @@ jobs:
           if [ "$(git rev-parse refs/pr/head)" != "$HEAD_SHA" ]; then
             echo "::error::PR head moved since this run started; the newer push gets its own run"; exit 1
           fi
+      # GitHub server times only (never commit dates, which the pusher sets). Read-only API calls
+      # with the workflow's own token; no PR code runs here. A failed or empty read leaves the file
+      # empty, and gate-check then FAILs whenever protected files changed (fail closed).
+      - name: Read label time and push times (GitHub API, read only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          : > "$RUNNER_TEMP/label-time"; : > "$RUNNER_TEMP/pushes"
+          # Most recent 'labeled' event for the label (issue events of the PR, server created_at).
+          if events=$(gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
+                --jq '.[] | select(.event == "labeled" and .label.name == "framework-change-approved") | .created_at'); then
+            printf '%s\n' "$events" | sed '/^$/d' | sort | tail -n 1 > "$RUNNER_TEMP/label-time"
+          else
+            echo "::warning::could not read the PR's label events"
+          fi
+          # Every push GitHub recorded on the head branch: "<server timestamp> <tip after the push>".
+          # Only branches of this repo have activity here; a fork PR gets none (fail closed if protected).
+          if [ "$HEAD_REPO" != "$REPO" ]; then
+            echo "::warning::head branch is in a fork ($HEAD_REPO): no push times, protected changes can't be approved"
+          else
+            for attempt in 1 2 3 4 5 6; do
+              if pushes=$(gh api --method GET --paginate -f ref="refs/heads/$BRANCH" -f per_page=100 \
+                    "repos/$REPO/activity" --jq '.[] | "\(.timestamp) \(.after)"'); then
+                printf '%s\n' "$pushes" | sed '/^$/d' > "$RUNNER_TEMP/pushes"
+                # The activity log can lag the push event by a few seconds: wait for this run's head.
+                grep -q " $HEAD_SHA\$" "$RUNNER_TEMP/pushes" && break
+              else
+                echo "::warning::could not read the head branch's push activity (attempt $attempt)"
+              fi
+              [ "$attempt" = 6 ] || sleep 10
+            done
+          fi
+          echo "label time: $(cat "$RUNNER_TEMP/label-time")"; echo "pushes recorded: $(wc -l < "$RUNNER_TEMP/pushes")"
       - name: Gate
         env:
           BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           FRAMEWORK_CHANGE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'framework-change-approved') && '1' || '0' }}
         # Always judged against main, never against the PR's (changeable) base branch.
-        run: bash scripts/gate-check.sh --base origin/main --head "$HEAD_SHA" --branch "$BRANCH"
+        # The token is not passed to this step.
+        run: |
+          FRAMEWORK_LABEL_TIME="$(cat "$RUNNER_TEMP/label-time")" PR_HEAD_PUSHES="$(cat "$RUNNER_TEMP/pushes")" \
+            bash scripts/gate-check.sh --base origin/main --head "$HEAD_SHA" --branch "$BRANCH"
