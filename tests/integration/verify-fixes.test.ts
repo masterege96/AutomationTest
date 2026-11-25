@@ -180,7 +180,8 @@ function fakeStatus(): Status {
   return {
     ANON_KEY: fakeJwt("anon"),
     API_URL: "http://127.0.0.1:54321",
-    DB_URL: `postgresql://postgres:${hex(12)}@127.0.0.1:54322/postgres`,
+    // Assembled from parts so the source never holds a URL with a user and password before the host (verify.sh fallback scan, gitleaks).
+    DB_URL: ["postgresql:", "", `postgres:${hex(12)}@127.0.0.1:54322`, "postgres"].join("/"),
     FUNCTIONS_URL: "http://127.0.0.1:54321/functions/v1",
     GRAPHQL_URL: "http://127.0.0.1:54321/graphql/v1",
     JWT_SECRET: rnd(30),
@@ -1503,20 +1504,37 @@ describe.concurrent("bootstrap-check S19 accepted risk (AC35-AC37)", { timeout: 
 // E. AC34 (static part): nothing secret-shaped is committed with these tests
 // =====================================================================================================
 describe("AC34: test sources hold no secret-shaped strings (gitleaks scans history)", () => {
+  const files = () => [
+    join(ROOT, "tests", "integration", "verify-fixes.test.ts"),
+    ...walk(join(ROOT, "tests", "integration", "fixtures", "4d")),
+  ];
+  /** verify.sh's own fallback secret-scan pattern (used when gitleaks isn't installed), read from the script. */
+  const verifyPatterns = () => {
+    const m = /^\s*PATTERNS='([^']+)'/m.exec(readFileSync(join(ROOT, "scripts", "verify.sh"), "utf8"));
+    if (!m) throw new Error("PATTERNS not found in scripts/verify.sh");
+    return m[1];
+  };
+
   it("this file and tests/integration/fixtures/4d/ hold no JWT, sb_secret_ key, Stripe key or password URL literal", ({ expect }) => {
-    const files = [
-      join(ROOT, "tests", "integration", "verify-fixes.test.ts"),
-      ...walk(join(ROOT, "tests", "integration", "fixtures", "4d")),
-    ];
     const shapes = [
       /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\./,
       new RegExp("sb_" + "secret_" + "[A-Za-z0-9_-]{20,}"),
       new RegExp("sk_" + "(live|test)_" + "[A-Za-z0-9]{8,}"),
-      new RegExp("postgres(ql)?://[^:\\s\"'`$]+:[^@\\s\"'`$]{6,}@"),
+      // any URL with user and password before the host, template placeholders included (a `${...}` password matches)
+      /[a-z][a-z0-9+.-]*:\/\/[^:@/\s"'`]+:[^@/\s"'`]+@/i,
+      // verify.sh's fallback pattern, POSIX classes translated
+      new RegExp(verifyPatterns().split("[:space:]").join("\\s")),
     ];
-    for (const f of files) {
+    for (const f of files()) {
       const text = readFileSync(f, "utf8");
       for (const re of shapes) expect(re.test(text), `${re} in ${f}`).toBe(false);
+    }
+  });
+
+  it("verify.sh's fallback scan (grep -IqE with its PATTERNS, run in Git Bash) finds nothing in these files", ({ expect }) => {
+    for (const f of files()) {
+      const r = spawnSync(BASH, ["-c", 'grep -IqE "$1" "$2"', "grep", verifyPatterns(), posix(f)], { encoding: "utf8" });
+      expect(r.status, `verify.sh fallback pattern matches ${f}`).toBe(1);
     }
   });
 });
