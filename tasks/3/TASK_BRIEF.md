@@ -411,6 +411,19 @@ Branch `test/3-todos-tests` (worktree `wt-3-qa-test`, from `feat/3-todos`). Not 
 - **Left on the shared stack:** test users `qa3-*@test.local` and `qa-probe*@test.local` (two probe users from checking the Mailpit/OTP flow) and their to-dos; gone at the next `db reset`. Nothing deleted, no reset, no stop.
 - **Next:** after integration, qa-test runs `npm test` and `npm run test:e2e` with the stack env and reports pass/fail per test-plan line with owning roles.
 
+### qa-test, 2026-11-25 (integration run)
+
+Branch `test/3-todos-tests` fast-forwarded to the integrated `4469360`, plus `31b886c` (test alignment). Not pushed, not merged. Local stack restarted and reset by the orchestrator; Chromium installed; env exported per the devops-cicd Handoff (values only in the shell).
+- **Aligned to the build (naming only):** sign-in at `/sign-in`; header "Signed in as <email>"; new unit tests `tests/integration/cookie-options.test.ts` (C4, `cookieOptionsFor`, 14) and N2 for `generateNonce` in `csp.test.ts` (2). `z.guid()` ids need no test change (my invalid ids are all malformed).
+- **Test-side fixes (my tests were wrong; no assertion weakened):** checkbox clicked then waited for the server-confirmed state (controlled checkbox; Playwright `check()` wants an immediate change); AC8 opens the list twice so Back has a list entry to return to (sign-out uses `location.replace`); AC15 second sign-in via an admin-made session (a second UI code request within 60 s is refused by design, and an admin-generated code counts as a send); AC37 injects only into the served HTML (inline script, guessed nonce, `onerror` handler), because `page.evaluate()` insertion bypasses CSP in Chromium (even a `data:` script ran); AC25 scans for the DB password only if it is 16+ characters (local default `postgres` is a word in client JS: false positive); AC45 titles unique per run.
+- **Results:** `npm test`: 12 files, 211/211 pass. `npm run test:e2e`: 125 tests, 122 pass, 3 fail. `bash scripts/verify.sh --brief tasks/3/TASK_BRIEF.md` (with DB): `verify.sh: FAIL 1/19 failed: npm run test:e2e (0 skipped)`.
+- **Remaining failures (app differs from AC/contract; tests kept):**
+  1. `AC21/T1: no session + x-middleware-prefetch: 1 -> every to-do API 401, ...`: `expected 401, received 200` with body `{}` on list, read, create, change and delete (probe). Next answers the request itself before any handler; no data, DB unchanged. **backend-dev** (proxy/handler must give 401 for this header, or security accepts it as a documented exception and amends AC21/T1).
+  2. `AC21/T1: no session + rsc: 1 -> ...`: `expected 401, received 307` (Location `<path>?_rsc`) on every endpoint; no data, DB unchanged. **backend-dev** (same decision as 1; backend's Handoff already noted it).
+  3. `AC18: a body that isn't JSON -> 400 invalid_json on create and edit`: `expected "invalid_json", received "validation_failed"` for `not json`, `{`, `{"title":"x",}`, `""`, `'title'`. Status 400 is right; the code contradicts the Option A contract and backend-dev's own Handoff (`invalid_json`). **backend-dev**.
+- **Local auth limits:** kept as is (each sign-in its own address); the local stack doesn't enforce per-IP limits (L21); recorded in `specs/3/test-plan.md`.
+
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
