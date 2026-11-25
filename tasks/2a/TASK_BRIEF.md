@@ -70,6 +70,15 @@ specs/2a/**     # schema.md (db-architect), threat-model.md + security-gate.md (
 
 ---
 
+
+### Answers from the person (2026-11-25, recorded in tasks/decisions.md on the 2a branch)
+
+- Q1: global revoke of EXECUTE on functions created by role `postgres` in **any schema**, from `PUBLIC`, `anon` and `authenticated` (no `IN SCHEMA`). Every function migration grants explicitly. ACs 1-3 apply to `public` and, through the global default, to every schema.
+- Q2: role `postgres` only.
+- Q3: a fixed CSP in `next.config` now; a nonce CSP with middleware in task 3.
+- Q4: CAPTCHA off locally and in CI; Cloudflare Turnstile and the person's SMTP choice go on the production dashboard checklist (the person applies them).
+- Auth checks in 2b: a static vitest test that parses `supabase/config.toml`, plus one manual live check on the local stack recorded in the Handoff (verify.sh runs tests before the DB starts; fixed separately in task 2c).
+
 ## Handoff (each role appends; never delete earlier entries)
 
 ### product-spec, 2026-11-25
