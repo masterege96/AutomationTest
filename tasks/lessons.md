@@ -253,6 +253,18 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **Related:** lesson numbers collide across branches (2a and 2b both wrote an "L17"); they get renumbered
   when merged.
 
+## L20. `throws_ok($q$ set local role ...; select fn() $q$)` leaks the role when the call succeeds (open)
+
+- **Seen:** task 2a negative control. The T3 pattern from `specs/2a/schema.md` and the threat model
+  (`set local role anon; select public.t2_probe()` inside `throws_ok`) works when the call fails (the
+  subtransaction rollback undoes the role switch), but when the call wrongly succeeds the subtransaction
+  commits and `set local role` stays. The rest of the file then ran as `authenticated`: the next statement
+  failed ("permission denied to change default privileges") and pgTAP reported a bad plan (25/30), so later
+  assertions (T6, idempotence, T4) never ran.
+- **Fix used:** end the SQL string with `; reset role` (runs only if the call succeeds). `lives_ok` strings need it
+  too. The test still asserts `current_user = 'postgres'` afterwards.
+- **Fix to the framework (suggested, db-architect/security):** write the pattern with the trailing `reset role`
+  in schema.md convention rule 5.2 and the threat-model template, so later function migrations copy the safe form.
 ## L21. The local stack doesn't enforce the per-IP auth rate limits (open, security decides)
 
 - **Seen:** task 2b, manual check L1: with `token_verifications = 5` in `config.toml` (auth container env
@@ -275,3 +287,11 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **Suggested fix:** in gate-check.sh, compute the last code change with `git log --first-parent --no-merges`
   on the branch, or compare the PR's net diff (`git diff MB..HEAD`) at the gate commit vs. at HEAD; framework
   change, needs the person's label. Until then: merge main before running the gates, not after.
+
+## L23. Shared tasks/board.md and tasks/lessons.md caused merge conflicts for the third time (open, devops-cicd)
+
+- **Seen:** PRs #9, #10 and #11 each conflicted with main in `tasks/board.md` and `tasks/lessons.md` after
+  another task's PR merged; each time CI didn't run until main was merged in (L19), and the catch-up merge
+  made the gates stale whenever main had non-tasks changes (L22).
+- **Fix (plan step 4):** one file per task (`tasks/<id>/status.md`, `tasks/lessons/<id>-<n>.md`), or
+  append-only files with a `merge=union` rule in `.gitattributes`.
