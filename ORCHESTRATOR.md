@@ -66,7 +66,9 @@ GitHub's required review count on `main` is **0**. Approval is the required
 **`merge-gate`** check from `.github/workflows/gate.yml`. It runs on
 `pull_request_target`, so the workflow and `scripts/gate-check.sh` come from `main`;
 the PR's commit is only fetched and read with git, never checked out or executed.
-A PR therefore can't edit the gate that judges it. It passes only when, for the task
+A PR therefore can't edit the gate that judges it (open residual risks: a PR-defined
+job with the same check name, and `tasks/**`-only changes; see `tasks/lessons.md` L11).
+It always judges against `main` and fails for any other base. It passes only when, for the task
 named by the branch (`<type>/<id>-<name>`):
 
 - the **first** non-empty line of `specs/<id>/security-gate.md` is `Result: PASS`

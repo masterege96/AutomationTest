@@ -9,8 +9,9 @@ conventions. If something isn't here or in the repo, agents must ask, not guess.
 - **What it does (2 sentences):** Pilot app for the agent team framework: a to-do app with login, built on Next.js and Supabase. Each signed-in user can create, view, complete and delete only their own to-dos.
 - **Hosting type:** Supabase-hosted
 - **Repo URL:** https://github.com/masterege96/AutomationTest
+- **Supabase project:** AutomationTests (region: Europe). The project ref, keys and passwords are never written in files; CI reads them from the GitHub Environment `production` (main only).
 - **Production URL:** not decided yet (app hosting not chosen; the person decides)
-- **Deploy path:** Supabase GitHub integration / CI job (`supabase db push`)
+- **Deploy path:** Supabase GitHub integration
 
 ## Stack and pinned versions
 

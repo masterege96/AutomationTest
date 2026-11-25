@@ -5,25 +5,42 @@
 name: gate
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    # "edited" covers a retargeted base branch, so the gate re-runs against main.
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited]
 permissions:
   contents: read
+concurrency:
+  group: merge-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   merge-gate:
     runs-on: ubuntu-24.04 # pinned runner image, like ci.yml (no "latest")
     timeout-minutes: 5
     steps:
+      - name: Only PRs into main can pass
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$BASE_REF" != "main" ]; then
+            echo "::error::merge-gate only approves PRs into main (base is '$BASE_REF')"; exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, base branch, not the PR
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Fetch PR head (read only)
+      - name: Fetch PR head (read only) and pin it to the reported SHA
         env:
           PR: ${{ github.event.pull_request.number }}
-        run: git fetch --no-tags origin "+refs/pull/${PR}/head:refs/pr/head"
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git fetch --no-tags origin "+refs/pull/${PR}/head:refs/pr/head"
+          if [ "$(git rev-parse refs/pr/head)" != "$HEAD_SHA" ]; then
+            echo "::error::PR head moved since this run started; the newer push gets its own run"; exit 1
+          fi
       - name: Gate
         env:
-          BASE_REF: ${{ github.base_ref }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           FRAMEWORK_CHANGE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'framework-change-approved') && '1' || '0' }}
-        run: bash scripts/gate-check.sh --base "origin/${BASE_REF}" --head refs/pr/head --branch "$BRANCH"
+        # Always judged against main, never against the PR's (changeable) base branch.
+        run: bash scripts/gate-check.sh --base origin/main --head "$HEAD_SHA" --branch "$BRANCH"

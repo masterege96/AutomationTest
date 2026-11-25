@@ -69,10 +69,14 @@ jobs:
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -o pipefail
-          npx --no-install supabase db diff --remote --schema "$DRIFT_SCHEMAS" 2>diff.err | tee diff.sql || {
-            echo "::error::supabase db diff did not run"; cat diff.err; exit 1; }
+          # The repo is public: never print the schema diff to the log (S18). CLI errors are shown (secrets are masked).
+          if ! npx --no-install supabase db diff --remote --schema "$DRIFT_SCHEMAS" >diff.sql 2>diff.err; then
+            echo "::error::supabase db diff did not run"; tail -20 diff.err; exit 1
+          fi
           # Judge on content: anything other than blank lines and SQL comments is drift.
-          if grep -vE '^[[:space:]]*(--.*)?$' diff.sql >/dev/null; then
+          CHANGED_LINES=$(grep -cvE '^[[:space:]]*(--.*)?$' diff.sql || true)
+          echo "diff: $CHANGED_LINES non-comment lines, sha256 $(sha256sum diff.sql | cut -c1-12)"
+          if [ "$CHANGED_LINES" -gt 0 ]; then
             echo "drift=yes" >> "$GITHUB_OUTPUT"
             echo "::error::Drift: production differs from supabase/migrations"
             exit 1
@@ -87,7 +91,7 @@ jobs:
           script: |
             // The repo is public: link to the run, never paste the schema diff into the issue.
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `Drift check failed: ${run}\n\nProduction differs from \`supabase/migrations\`. The diff is in the run log.\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.`;
+            const body = `Drift check failed: ${run}\n\nProduction differs from \`supabase/migrations\`. The run log shows only a line count and hash (public repo); db-builder reproduces the diff locally with the read-only \`supabase db diff --remote\` (rules/database-and-deploy.md rule 7).\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.`;
             const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'drift' });
             if (open.length) {
               await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
