@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | SPEC_READY |
+| State | IN_REVIEW |
 | Owner role | devops-cicd (build), qa-test (tests) |
 | Branch | `ci/4b-gate-freshness` |
 | Worktree | `../wt-4b-devops-cicd` |
