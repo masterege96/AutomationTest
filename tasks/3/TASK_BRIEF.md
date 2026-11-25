@@ -475,8 +475,8 @@ is recorded in `tasks/decisions.md`** (AC46). Agents never change production; ea
   - **Fail:** no 429 by attempt 31, or any 200: stop, row 9 FAIL in production, tell security. (c) does not apply.
 - [ ] **R7 P2:** a signed-in test user makes 60 to-do API calls (list/toggle) in 3 minutes on the deployed app.
       Pass: no 401 and no 429. Fail: tell security (a design change, not higher limits).
-- [ ] **R8 P4:** on the host, the session cookie has `Secure`; `Origin: https://evil.example` gets 403 and a
-      same-origin request works; the CDN strips `x-middleware-subrequest` and keeps `_rsc` in its cache key.
+- [ ] **R8 P4:** on the host, the session cookie has `Secure`; `Origin: https://evil.example` gets 403 and a same-origin
+      to-do create works; the CDN strips `x-middleware-subrequest` and keeps `_rsc` in its cache key.
 - [ ] **R9 Real-user run on the host:** sign in with a code, create, list, toggle, edit, delete; a second user sees
       none of them; sign out. git-release records it in `specs/3/post-deploy.md`; the orchestrator moves task 3 to DONE.
 - [ ] **R10 Keep off:** leave Auth IP address forwarding off; create no secret API key and no new secret env var for
