@@ -183,7 +183,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   decides whether to grant it or to have the diff use only the DB password with a read-only role (follow-up).
 - **Production migration history (read-only, via the Supabase connector's list_migrations):** empty. The init
   migration `20261125104017` is not applied, so the Supabase GitHub integration hasn't deployed yet. The
-  person checks the integration (production branch `main`, directory `supabase`, "Deploy to production" on).
+  person checks the integration (production branch `main`, directory `.` (the folder that contains `supabase/`), "Deploy to production" on).
   Nothing was changed in production.
 - **Note (AGENT_RULES 13):** the Supabase connector on this machine also exposes write tools
   (`execute_sql`, `apply_migration`). They were not used and must never be used against production.
@@ -197,6 +197,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   exposed schema grants exactly the privileges the API needs, and a pgTAP test checks those grants.
 - **Process note:** drift run 45624888333's artifact was downloaded and deleted about a minute after upload;
   the opt-in upload path worked as designed (gitleaks clean).
+
 ## L15. verify.sh flags privilege names as destructive SQL (open, the person decides)
 
 - **Seen:** task 1, `verify.sh --brief tasks/1/TASK_BRIEF.md`:
@@ -221,3 +222,12 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **To check in step 4 (devops-cicd):** whether the `labeled` event run was created and cancelled by the
   `concurrency: ci-${{ github.ref }}` group, or never created (e.g. Actions delay). Then document the
   expected way to re-evaluate a PR after a label change.
+
+## L17. A post-deploy record under specs/<id>/ makes the task's gates stale (open, devops-cicd)
+
+- `gate-check.sh` treats every change outside `specs/<id>/security-gate.md`, `specs/<id>/review.md` and
+  `tasks/**` as a code change. `specs/<id>/post-deploy.md` (git-release, written after merge) would
+  therefore need both gates re-run, although it isn't code. verify.sh's scope check already allows it.
+- **Workaround used (task 0, task 1):** the post-deploy evidence is in the briefs' Handoff sections.
+- **Suggested fix:** exclude `specs/<id>/post-deploy.md` from `LAST_CODE` in gate-check.sh, the same way
+  as the two gate files (framework change, needs the person's label).
