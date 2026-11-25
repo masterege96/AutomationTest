@@ -48,6 +48,19 @@ test.describe("CSRF: Origin check and JSON-only (C1-C3)", () => {
     });
   }
 
+  // Code review (task 3): DELETE also requires the JSON content type (threat model 5; order 403 -> 401 -> 415).
+  for (const contentType of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", null]) {
+    test(`C3: same-origin DELETE of the user's own to-do with Content-Type ${contentType ?? "(none)"} -> 415; row still there`, async ({ api, userA }) => {
+      const id = seedTodo(userA.id, `C3 delete target ${contentType}`);
+      const before = todoById(id);
+      const a = await api(userA.cookies);
+      const headers = { "content-type": contentType };
+      expectError(await a.call("DELETE", `/api/todos/${id}`, { headers }), 415, "unsupported_media_type");
+      expectError(await a.call("DELETE", `/api/todos/${id}`, { headers, body: "id=1" }), 415, "unsupported_media_type");
+      expect(todoById(id)).toEqual(before);
+    });
+  }
+
   test("C1: a CORS preflight from a foreign origin gets no Access-Control-Allow-* headers", async ({ api, userA }) => {
     const a = await api(userA.cookies);
     const r = await a.call("OPTIONS", "/api/todos", {

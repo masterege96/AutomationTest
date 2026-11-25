@@ -9,7 +9,7 @@ export type Todo = { id: string; title: string; done: boolean; created_at: strin
 export type ErrorBody = { error: { code: string; message: string } };
 
 export type CallOpts = {
-  /** Override or drop (`null`) headers. Defaults: Origin = app origin, Content-Type = application/json (with a body). */
+  /** Override or drop (`null`) headers. Defaults: Origin = app origin and Content-Type = application/json on every non-GET request (and with a body). */
   headers?: Record<string, string | null>;
   /** Raw body text. If `json` is given instead, it is JSON.stringify'd. */
   body?: string;
@@ -37,7 +37,9 @@ export class Api {
     const body = opts.json !== undefined ? JSON.stringify(opts.json) : opts.body;
     const headers: Record<string, string | null> = {};
     if (method !== "GET" && method !== "HEAD") headers.origin = APP_ORIGIN;
-    if (body !== undefined) headers["content-type"] = "application/json";
+    // Like the app's own client (lib/client/api.ts): every state-changing request, DELETE included, sends the JSON
+    // content type (threat model 5; DELETE without it is 415 since ef37275).
+    if (body !== undefined || (method !== "GET" && method !== "HEAD" && method !== "OPTIONS")) headers["content-type"] = "application/json";
     if (this.cookies && this.cookies.length > 0) headers.cookie = cookieHeader(this.cookies);
     for (const [k, v] of Object.entries(opts.headers ?? {})) headers[k.toLowerCase()] = v;
     const finalHeaders: Record<string, string> = {};
