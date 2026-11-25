@@ -196,31 +196,9 @@ XSS=$(grep -rlE 'dangerouslySetInnerHTML' --include='*.tsx' --include='*.jsx' . 
   | xargs -r grep -LE 'DOMPurify|sanitize' 2>/dev/null || true)
 [ -z "$XSS" ] && ok "no unsanitized dangerouslySetInnerHTML" || bad "dangerouslySetInnerHTML without sanitizing" "$XSS"
 
-# ---------- 5. Project checks (typecheck, lint, tests, build) ----------
-if [ -f package.json ]; then
-  echo "[project]"
-  PM=npm
-  [ -f pnpm-lock.yaml ] && PM=pnpm
-  [ -f yarn.lock ] && PM=yarn
-  [ -f bun.lockb ] && PM=bun
-  has_script() { node -e "process.exit(require('./package.json').scripts?.['$1']?0:1)" 2>/dev/null; }
-  run_script() {   # name, required(yes/no)
-    if has_script "$1"; then
-      if $PM run "$1" >/tmp/verify-"$1".log 2>&1; then ok "$PM run $1"
-      else bad "$PM run $1" "$(tail -20 /tmp/verify-"$1".log)"; fi
-    elif [ "$2" = yes ]; then bad "script '$1' missing from package.json" "Add it. verify.sh needs a deterministic $1 command."
-    else skip "$1 (no script)"; fi
-  }
-  run_script typecheck yes
-  run_script lint yes
-  run_script test yes
-  run_script test:e2e no
-  run_script build yes
-else
-  skip "project checks (no package.json)"
-fi
-
-# ---------- 6. Database from scratch ----------
+# ---------- 5. Database from scratch ----------
+# Runs before the project checks: tests that need the running local stack (auth, e2e)
+# must find it started and the database freshly built. The stack is left running.
 if [ -d supabase ]; then
   echo "[database]"
   if [ "$NO_DB" = 1 ]; then
@@ -252,6 +230,30 @@ if [ -d supabase ]; then
       skip "migrations, database tests and SQL lint (local database not running)"
     fi
   fi
+fi
+
+# ---------- 6. Project checks (typecheck, lint, tests, build) ----------
+if [ -f package.json ]; then
+  echo "[project]"
+  PM=npm
+  [ -f pnpm-lock.yaml ] && PM=pnpm
+  [ -f yarn.lock ] && PM=yarn
+  [ -f bun.lockb ] && PM=bun
+  has_script() { node -e "process.exit(require('./package.json').scripts?.['$1']?0:1)" 2>/dev/null; }
+  run_script() {   # name, required(yes/no)
+    if has_script "$1"; then
+      if $PM run "$1" >/tmp/verify-"$1".log 2>&1; then ok "$PM run $1"
+      else bad "$PM run $1" "$(tail -20 /tmp/verify-"$1".log)"; fi
+    elif [ "$2" = yes ]; then bad "script '$1' missing from package.json" "Add it. verify.sh needs a deterministic $1 command."
+    else skip "$1 (no script)"; fi
+  }
+  run_script typecheck yes
+  run_script lint yes
+  run_script test yes
+  run_script test:e2e no
+  run_script build yes
+else
+  skip "project checks (no package.json)"
 fi
 
 echo
