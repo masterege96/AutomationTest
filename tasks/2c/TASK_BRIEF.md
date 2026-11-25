@@ -140,3 +140,7 @@ scripts/verify.sh
 
 - **Missing:**
 - **Who must provide it:**
+
+### orchestrator, 2026-11-25
+
+- qa-test is not run for 2c: the change is a pure reorder of an existing script with no product behavior; the builder's AC runs (incl. PATH-stub runs for AC7/AC8) and the code-reviewer's independent AC runs cover it. Recorded here instead of a test plan.
