@@ -231,3 +231,24 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **Workaround used (task 0, task 1):** the post-deploy evidence is in the briefs' Handoff sections.
 - **Suggested fix:** exclude `specs/<id>/post-deploy.md` from `LAST_CODE` in gate-check.sh, the same way
   as the two gate files (framework change, needs the person's label).
+## L18. verify.sh ran the project tests before the local database started (fixed in task 2c)
+
+- **Seen:** task 2b design: `scripts/verify.sh` ran "Project checks" (`npm test`, `test:e2e`) before
+  "Database from scratch" started the local Supabase stack, so tests that need the stack (auth, e2e)
+  could not pass in verify.sh or CI.
+- **Fixed:** task 2c moves the database section before the project checks (headings renumbered, comment
+  at the section). No check added, removed or changed.
+- **Still open:** the CI `verify` job sets no local-stack env vars (URL, keys). That is a separate task
+  (devops-cicd, workflow) when the first test that needs them lands.
+
+## L19. A PR with merge conflicts gets no `pull_request` CI run (open, orchestrator/git-release)
+
+- **Seen:** PR #9 (task 2c) after PR #8 merged: only `merge-gate` (pull_request_target) ran; ci.yml's
+  verify/db-check/secrets never started, because GitHub doesn't run `pull_request` workflows while the PR
+  is `CONFLICTING`. Conflicts were only in `tasks/board.md` and `tasks/lessons.md`.
+- **Likely also explains L16** (no run after the label on PR #7, which was behind/conflicting with main then).
+- **Fix suggested:** parallel branches shouldn't all append to the same shared files. Use per-task lesson
+  files (`tasks/<id>/lessons.md`) or task-scoped lesson ids, and let only git-release update `tasks/board.md`
+  after merge. Until then, git-release merges main into open PRs right after each merge.
+- **Related:** lesson numbers collide across branches (2a and 2b both wrote an "L17"); they get renumbered
+  when merged.
