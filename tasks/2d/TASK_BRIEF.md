@@ -66,6 +66,7 @@ framework change for devops-cicd and the person; this task avoids it by recordin
   drift run 45651393581 on `main` (af59b2d): `diff: 0 non-comment lines`, "No drift."; GitHub check runs of the merge commits.
 - **Result:** 2c `DONE`; 2a `VERIFYING` (the person runs the two read-only `pg_default_acl` SELECTs, see
   `specs/2a/post-deploy.md`); 2b `VERIFYING` (dashboard items 1-21 and item 22 are the person's).
+- **verify.sh:** `bash scripts/verify.sh` (brief from branch name): `verify.sh: PASS 17/17 (1 skipped)` (skipped: test:e2e, no script).
 - **Left to do:** security gate (`specs/2d/security-gate.md`) and code review (`specs/2d/review.md`), each in a fresh context and its own commit after the records.
 
 ## Blocked (fill in only when BLOCKED)
