@@ -60,6 +60,11 @@ BACKLOG → SPEC_READY → IN_PROGRESS → IN_REVIEW → VERIFYING → DONE
 | `DONE` | Proven in production | orchestrator only | `post-deploy.md`: migrations in production history, drift check green, feature tested as a real user |
 | `BLOCKED` | Can't continue without something | any role | A `Blocked` entry: what's missing, who must provide it |
 
+The `| State |` row of `tasks/<id>/TASK_BRIEF.md` is the only record of a task's
+state. Whoever moves a task in (column "Who moves it in") edits that row: the state
+word first, optionally followed by a note, e.g. `VERIFYING (the person: ...)`.
+`bash scripts/board.sh` prints the board (id, title, state, owner) from the briefs.
+
 ## 3a. Merge approval
 
 GitHub's required review count on `main` is **0**. Approval is the required
@@ -83,6 +88,17 @@ named by the branch (`<type>/<id>-<name>`):
 Branch protection on `main`: PR required, 0 approvals, required checks `verify`,
 `db-check`, `secrets`, `merge-gate`, and **"Do not allow bypassing the above settings"
 on** (admins included).
+
+**A PR with merge conflicts gets no CI run** (`tasks/lessons.md` L19, L16). While a
+PR is `CONFLICTING`, GitHub starts no `pull_request` workflow runs, so `verify`,
+`db-check` and `secrets` don't run and only `merge-gate` (`pull_request_target`)
+does. A label change on such a PR doesn't produce a CI run either. `gh run rerun`
+re-uses the old run's event payload (the old labels), so it can't pick up a new
+label. To re-evaluate, resolve the conflict by merging `main` into the branch (the
+push starts a fresh run). Merge `main` before running the gates, not after: until
+task 4b, a catch-up merge that brings in changes outside `tasks/**` makes the gates
+stale (`tasks/lessons.md` L22). After each merge, git-release checks the other open
+PRs for conflicts.
 
 **security** and **code-reviewer** each run in a fresh agent context, never the
 builder's, and never each other's. They read the repo and the brief, not the builder's
@@ -122,18 +138,32 @@ Send the task back instead of guessing:
 
 ```
 tasks/
-  board.md                 # one line per task: id, title, state, owner
-  <id>/TASK_BRIEF.md       # from templates/TASK_BRIEF.md
-  decisions.md             # decisions the person made
-  lessons.md               # failures → which contract or check to fix
+  <id>/TASK_BRIEF.md       # from templates/TASK_BRIEF.md; its | State | row is the task's state
+  <id>/lessons.md          # this task's lessons (ids L<id>.<n>) and Closes: lines (section 8)
+  decisions/<YYYY-MM-DD>-<task-id>-<slug>.md   # one file per decision the person made
+  lessons.md               # frozen archive (L1-L27): cite entries, never add
+  decisions.md             # frozen archive of earlier decisions: cite entries, never add
   incidents/               # drift and secret incidents
 specs/<id>/
   schema.md  threat-model.md  test-plan.md
   security-gate.md  review.md  post-deploy.md
 ```
 
+Each task writes only its own files, so parallel task branches don't conflict over
+state, lessons or decisions. Read them from the repo root with `bash scripts/board.sh`
+(the board) and `bash scripts/lessons.sh` (open lessons). A decision file has the
+fields Date, Task, Who (the person's own words), Source and a Decision section; see
+`tasks/decisions/2026-11-25-4a-step-4-go-ahead.md`.
+
 ## 8. Learning loop
 
-Every entry in `tasks/lessons.md` ends with a fix to a role contract, a
-rulebook or a script. A lesson without a fix stays open. Review open lessons
-before starting each new task.
+Lessons go in `tasks/<id>/lessons.md` of the task that found them, as headings
+`## L<id>.<n>. <title> (<status>)` with the next free `<n>` (1, 2, ...). Every lesson
+ends with a fix to a role contract, a rulebook or a script. A lesson without a fix
+stays open. Run `bash scripts/lessons.sh` and review the open lessons it lists before
+starting each new task.
+
+A lesson is closed when its status (the last `( ... )` at the end of the heading)
+starts with `fixed`, `closed` or `info`, or when a line `Closes: <id>[, <id>...]` in
+any `tasks/<id>/lessons.md` names it. Archived lessons in `tasks/lessons.md` are
+closed only with a `Closes:` line in the fixing task's file; the archive isn't edited.
