@@ -4,9 +4,12 @@ Author: git-release, 2026-11-25. Read-only evidence only; nothing in production 
 
 ## Deploy
 
-- PR #14 squash-merged as `89b1c2e` at 2026-11-25 18:46 UTC. Required checks on the PR (with the person's
-  `framework-change-approved` label): `verify`, `db-check`, `secrets`, `merge-gate` all SUCCESS.
-- Supabase GitHub integration check ("Supabase Preview") on `89b1c2e`: success.
+- PR #14 (https://github.com/masterege96/AutomationTest/pull/14) squash-merged as `89b1c2e` at 2026-11-25 18:42:59 UTC.
+  Final required checks (after the person added the `framework-change-approved` label): `verify`, `db-check`,
+  `secrets`, `merge-gate` all SUCCESS. An earlier `merge-gate` run (45675569229, 18:29 UTC) failed only because the
+  label was not on the PR yet; it re-ran green at 18:34 UTC once the label was added.
+- Deploy: the Supabase GitHub integration check ("Supabase Preview") on `89b1c2e` succeeded at 18:43 UTC; it is the
+  deploy path (no separate deploy workflow run exists).
 - App code: no production app hosting exists yet (`PROJECT_CONTEXT.md`: production URL not decided), so the UI and
   `/api/todos` are not served to anyone. Only the database part is deployed.
 
@@ -23,7 +26,8 @@ Read-only `list_migrations` (Supabase connector, project AutomationTests), 2026-
 
 ## Drift after deploy
 
-Run 45678585136 (`workflow_dispatch`, `main` at `89b1c2e`): success, log `diff: 0 non-comment lines, sha256
+Run 45678585136 (https://github.com/masterege96/AutomationTest/actions/runs/45678585136; `workflow_dispatch`,
+`main` at `89b1c2e`): success, log `diff: 0 non-comment lines, sha256
 e3b0c44298fc` (empty diff), "No drift.", no artifact. The column-level grants and the FK into `auth`, which
 `specs/3/schema.md` section 10 flagged as possible tool noise, produced no drift lines.
 
@@ -43,10 +47,12 @@ them in the dashboard SQL editor for direct proof and paste the rows here.
 
 ## Release checklist (the person; AC46)
 
-No real user signs in until every item is recorded in `tasks/decisions.md`. The full list with how-to is in
-`tasks/3/TASK_BRIEF.md` ("orchestrator, 2026-11-25 (merged; release checklist for the person)"), items R1-R9:
-hosting build env, SMTP, URLs, email templates with the code, Turnstile (task 3b), P1-revised (row 9 burst), P2, P4,
-and the real-user run on the host.
+No real user signs in until every item is recorded in `tasks/decisions.md`. The list is in `tasks/3/TASK_BRIEF.md`
+("orchestrator, 2026-11-25 (merged; release checklist for the person)"), items R1-R10: hosting build env, SMTP, URLs,
+email templates with the code, Turnstile (task 3b), P1-revised (row 9 burst, with its Pass / Burst-bound / Fail
+outcomes), P2 (with its Fail action), P4, the real-user run on the host, and IP forwarding off / no secret API key.
+The source of the P1-revised and P2 outcomes is `specs/3/threat-model.md` 4.5 and the devops-cicd "Production
+checklist for the person" in the same brief; if they ever differ, the threat model wins.
 
 ## Result
 
