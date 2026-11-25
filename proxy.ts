@@ -5,7 +5,7 @@
 // It does NOT authorize anything: every page and API checks getUser() itself.
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
-import { cookieOptions } from "@/lib/client/cookie-options";
+import { cookieOptionsFor } from "@/lib/client/cookie-options";
 import { buildCsp, generateNonce } from "@/lib/server/csp";
 
 export async function proxy(request: NextRequest) {
@@ -31,7 +31,7 @@ export async function proxy(request: NextRequest) {
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (url && key) {
     const supabase = createServerClient(url, key, {
-      cookieOptions,
+      cookieOptions: cookieOptionsFor(request.nextUrl.hostname),
       cookies: {
         getAll() {
           return request.cookies.getAll();

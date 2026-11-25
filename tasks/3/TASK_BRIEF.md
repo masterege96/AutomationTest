@@ -353,7 +353,13 @@ Branch `feat/3-todos-api` (worktree `wt-3-backend-dev`, from `feat/3-todos`). No
 - **Open issues for the orchestrator / security:**
   - `lib/client/cookie-options.ts` (given to both builders verbatim) sets `secure` from `NODE_ENV` only; threat model 3.2 asks for a function of protocol/host, not `NODE_ENV` alone, unit-tested. With the e2e production build on `http://127.0.0.1` the session cookie is `Secure`; Chromium accepts `Secure` cookies on `http://127.0.0.1`/`localhost`, other browsers may not. Security/frontend-dev decide; backend imports whatever the file exports.
   - Origin check compares with `Host`; behind a host that sets `X-Forwarded-Host` (most PaaS proxies keep `Host`, some don't) it must be revisited when a host is chosen (threat model 5).
-  - `z.guid()` instead of `z.uuid()` (above): wider format, same DB safety; tell me if the contract must stay `z.uuid()`.
+  - ~~`z.guid()` instead of `z.uuid()`~~ resolved: see the follow-up below.
+
+#### backend-dev, 2026-11-25 (follow-up fix)
+
+- **Contract deviation (deliberate, accepted by the orchestrator 2026-11-25):** the `[id]` param is checked with `z.guid()` (any 8-4-4-4-12 hex, as Postgres `uuid` accepts), not `z.uuid()` as Option A said. A well-formed id that doesn't exist or isn't yours is 404; only a malformed one is 400 `invalid_id`.
+- **Cookie Secure flag (threat model 3.2):** frontend-dev's `cookieOptionsFor(hostname)` replaced the `cookieOptions` const. `proxy.ts` passes `request.nextUrl.hostname`; `lib/server/supabase.ts` passes the hostname from the `Host` header via `headers()` (port stripped by `hostnameFromHost()`; missing/unparsable → "" → Secure on, fail closed). `X-Forwarded-Host` is not read; like the Origin check, that waits for the hosting decision. The earlier open issue about `secure` from `NODE_ENV` is closed by this.
+- **Verified:** `npm run typecheck`, `npm run lint`, `npx vitest run lib/server`, `npm run build` (see commit message).
 ### frontend-dev, 2026-11-25 (build)
 
 Branch `feat/3-todos-ui` (worktree `wt-3-frontend-dev`, from `feat/3-todos`). Not pushed, not merged.

@@ -2,17 +2,33 @@
 // so RLS applies to every query. No service role anywhere (threat model row 2, row 3).
 import { createServerClient } from "@supabase/ssr";
 import type { User } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
-import { cookieOptions } from "@/lib/client/cookie-options";
+import { cookies, headers } from "next/headers";
+import { cookieOptionsFor } from "@/lib/client/cookie-options";
 import type { Database } from "@/types/database";
+
+/**
+ * Hostname (no port) from the request's Host header, for the cookie Secure flag (threat model 3.2).
+ * Unparsable or missing gives "", which cookieOptionsFor treats as non-loopback (Secure on: fail closed).
+ * X-Forwarded-Host is deliberately not read: like the Origin check (lib/server/origin.ts), handling it waits
+ * for the hosting decision.
+ */
+export function hostnameFromHost(host: string | null): string {
+  if (!host) return "";
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch {
+    return "";
+  }
+}
 
 export async function createClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error("Supabase env not set");
   const cookieStore = await cookies();
+  const hostname = hostnameFromHost((await headers()).get("host"));
   return createServerClient<Database>(url, key, {
-    cookieOptions,
+    cookieOptions: cookieOptionsFor(hostname),
     cookies: {
       getAll() {
         return cookieStore.getAll();
