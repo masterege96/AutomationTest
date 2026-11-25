@@ -358,3 +358,37 @@ commit -> PASS with label T2.
 - **Left to do:** qa-test: tests AC1-AC24, AC26 in `tests/integration/`. Security gate, review. Full
   `verify.sh` with the DB. After merge: AC25 (orchestrator with the person). This PR is judged by main's old gate
   (merge main before running the gates; the person labels after the last protected push).
+
+### qa-test, 2026-11-25
+
+- **Changed:** `tests/integration/gate-check.test.ts` (new, commit `915dc1d`). 78 Vitest tests: 69 fixture tests
+  (throwaway git repo per test via `fs.mkdtemp` in the OS temp dir, deleted after each test; fixed author/committer
+  names and dates; system/global git config ignored via `GIT_CONFIG_NOSYSTEM` + empty `GIT_CONFIG_GLOBAL`) running
+  `bash <worktree>/scripts/gate-check.sh --base main --head <sha> --branch ci/9x-demo` with the fixture as cwd
+  (Git Bash `%ProgramFiles%\Git\bin\bash.exe` on Windows, `bash` elsewhere), and 9 static checks on `gate.yml`.
+  Offline, no token, no sleeps.
+- **Coverage:** AC1-AC14 (incl. literal `--head HEAD`, AC8 re-gate after a stale merge), AC15 (all 14 protected
+  paths, one test each, plus modifying `scripts/tool.sh`), AC16, AC17 (incl. unordered/CRLF/blank/upper-case push
+  lines and a `000…` tip), AC18 (stale label, re-label, same-second label = stale, pushed-away-then-re-pushed C),
+  AC19 (non-protected push after the label; clean catch-up merge pushed after the label), AC20 (9 label-time and
+  10 push-line variants, incl. missing/malformed lines and HEAD not in the pushes), AC21 (both directions: commit dates
+  before the label still FAIL, commit dates after it still PASS), AC22 (incl. `FRAMEWORK_CHANGE_APPROVED=0`),
+  AC23/AC24 static (trigger types, read/none permissions only, single SHA-pinned `actions/checkout` without `ref:`,
+  `persist-credentials: false`, no checkout/run of PR content, "Only PRs into main" and head-SHA pin steps,
+  `GH_TOKEN: ${{ github.token }}` only in the read step and no `secrets.`, `gh api` read-only (explicit
+  `--method GET` with `-f`), server-time fields only, outputs emptied first, Gate step is last and can't be skipped).
+- **Verified:** `npx vitest run tests/integration/gate-check.test.ts`: 76 passed, 2 failed (about 220 s on Windows).
+  `npm test`: `Test Files 1 failed | 12 passed (13)`, `Tests 2 failed | 287 passed (289)`. Typecheck and ESLint clean
+  for the new file. No fixture dirs left in the temp dir.
+- **Bug found (owner devops-cicd), AC20 fail-open:** `FRAMEWORK_LABEL_TIME` is validated with
+  `printf '%s' "$X" | grep -qE "$TIME_RE"`, and grep matches line by line, so a multi-line value passes when ANY line
+  is a valid time. Then `[[ "$FRAMEWORK_LABEL_TIME" > "$PUSH_TIME" ]]` compares the whole string. Failing tests:
+  `AC20: label present, FRAMEWORK_LABEL_TIME two lines -> ...` and
+  `AC20: label present, FRAMEWORK_LABEL_TIME garbage line then a valid time -> ...`. The second gives
+  `gate-check: PASS` for `zzz` + a time BEFORE the push, so a stale label is approved. In CI the value comes from
+  `sort | tail -n 1` of server times, so it is hard to trigger there, but the gate is meant to fail closed on its
+  own input. Suggested fix: reject a value containing a newline (e.g. `[[ "$FRAMEWORK_LABEL_TIME" =~ ^[0-9]{4}-...Z$ ]]`
+  in bash, which matches the whole string). The `PR_HEAD_PUSHES` checks are not affected (each field is checked by itself).
+- **Notes:** AC25 is manual (orchestrator with the person). AC26: tests run in `npm test`, but the file takes about
+  3.5 min on Windows Git Bash (process start cost); the CI runner should be much faster.
+- **Left to do:** devops-cicd fixes the bug above, then qa-test re-runs; security gate; review.
