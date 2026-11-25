@@ -95,7 +95,14 @@ supabase/tests/*
 - **Left to do:** the items under Blocked. After PR #2 merges: a tiny PR removing the temporary `gate` job from ci.yml. Open should-fix findings from the PR #1 gates (S3, S5, S7, S9-S13) need tasks.
 - **Next role must know:** pipeline/framework changes need the person's `framework-change-approved` label; agents never add it (AGENT_RULES 18a).
 
+### git-release + devops-cicd, 2026-11-25 (PR #2 merged, PR #3 gate cleanup)
+
+- **Changed:** PR #2 squash-merged as 67b7204 with the person's label (run 45613293599: verify, db-check, secrets, gate PASS). PR #3 (`ci/0-gate-cleanup`): removed the temporary in-PR `gate` job, review nits N1-N5, S14 decision recorded, lessons L12, L13.
+- **Verified:** `verify.sh: PASS 18/18 (1 skipped)`; full `bootstrap-check: PASS 31/31 (0 skipped)` on main. First `merge-gate` run on PR #3 (check name `merge-gate`, app github-actions). PR #3 security gate PASS, review APPROVE. Drift runs 45613825796 (invalid project ref, L12) and 45615531058 (token scopes, L13) failed at `supabase link`, so no diff yet. Production migration history (read-only): empty.
+- **Left to do:** the Blocked items; then one green drift run and the init migration visible in production history.
+- **Next role must know:** the Supabase connector here has write tools; never use them against production (AGENT_RULES 13). Open review nit N7 (gate-check.sh header: `tasks/**` not counted as code, bold `**Result:**` accepted) goes in the next script change.
+
 ## Blocked (fill in only when BLOCKED)
 
-- **Missing:** (1) done by the person 2026-11-25: Supabase project AutomationTests + GitHub integration, `production` environment with the drift secrets; (2) one green drift run on main (git-release, after PR #2 merges); (3) the person: branch protection required check `merge-gate`, bypass not allowed; (4) the person: `framework-change-approved` label on PR #2; (5) the person: decide the open merge-gate risks in tasks/lessons.md L11 before the first real table.
+- **Missing:** (1) done by the person 2026-11-25: Supabase project AutomationTests + GitHub integration, `production` environment with the drift secrets, `SUPABASE_PROJECT_ID` corrected; (2) the person: drift token scopes (L13), then one green drift run on main (git-release re-runs it); (3) the person: Supabase integration has not applied the init migration yet (production history empty, L13), check its settings; (4) the person: branch protection required check `merge-gate` instead of `gate`, bypass not allowed; (5) the person: `framework-change-approved` label on PR #3; (6) S14 accepted for the pilot (decisions 2026-11-25); the other L11 risks still need a decision before the first real table.
 - **Who must provide it:** the person

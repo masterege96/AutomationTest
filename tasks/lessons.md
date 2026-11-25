@@ -137,7 +137,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   reported `head.sha`, concurrency group), S18 (drift log shows only a line count and hash, not the diff).
 - **Open (devops-cicd; the person decides):**
   - S14 (**accepted for the pilot**, see tasks/decisions.md 2026-11-25; fix in plan step 4 with a GitHub App that posts the gate result): a PR can add its own `pull_request` job named `merge-gate`. Suggested: gate-check FAILs when a
-    workflow at the PR head defines a job named `merge-gate`/`gate`, or the person accepts the risk.
+    workflow at the PR head defines a job named `merge-gate`/`gate`, or the person accepts the risk (the person accepted it for the pilot, see the entry above).
   - S5: a `tasks/**`-only PR (including `tasks/decisions.md`) passes with stale gate files. Suggested:
     protect `tasks/decisions.md`, and require gate commits in `MB..HEAD` even when there's no code change.
   - S15: protected-path list misses `.gitleaks.toml`, the rest of `.github/**`, `package.json`, lockfile,
@@ -148,7 +148,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   - S20/S21 (the person): roles/git-release.md "Owns ... branch protection, labels, merge settings"
     contradicts AGENT_RULES 18a.
 - **Added from security passes 2 and 3 (open):**
-  - S14 second variant: open a PR against a branch whose own `gate.yml` always passes
+  - S14 second variant (**accepted for the pilot** with S14, tasks/decisions.md 2026-11-25): open a PR against a branch whose own `gate.yml` always passes
     (`pull_request_target` runs the base branch's workflow), then retarget to `main` and re-run the old green
     run. A full fix needs a check source workflows can't imitate (GitHub App / org-level required workflow).
     With the Supabase integration on, a spoofed merge is a path to a production write: decide before the first real table.
@@ -161,7 +161,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **Seen:** drift run 45613825796 on main (workflow_dispatch, 2026-11-25), step "Link the production project".
 - **Exact error:** `Cannot resolve branch "***": the linked project ref is invalid (checked SUPABASE_PROJECT_ID, supabase/.temp/linked-project.json, supabase/.temp/project-ref). Relink the parent project first: supabase link --project-ref <parent-ref>`
 - **Cause:** Supabase CLI 3.2.0 treats a value that is exactly 20 lowercase letters as a project ref and
-  anything else as a branch name. The stored `SUPABASE_PROJECT_ID` (masked) isn't a 20-letter ref, so it was
+  other values can be read as a branch name. The stored `SUPABASE_PROJECT_ID` (masked) isn't a 20-letter ref, so it was
   read as a branch of a not-yet-linked project. Likely the project name, URL or a copy with spaces was stored.
   The CLI also reads `SUPABASE_PROJECT_ID` from the environment itself.
 - **Fix (the person):** set the `production` environment secret `SUPABASE_PROJECT_ID` to the project's
@@ -169,3 +169,21 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   `gh workflow run drift.yml --ref main`. Don't paste the value into chat or files.
 - **Framework fix suggested (devops-cicd):** drift.yml's secrets step should check the ref format
   (`^[a-z]{20}$`) and fail with this hint, without printing the value.
+- **Update after the person fixed the secret:** drift run 45615531058 got past the ref check; see L13.
+
+## L13. Drift token lacks scopes; production migration history is empty (open, the person)
+
+- **Seen:** drift run 45615531058 on main, step "Link the production project".
+- **Exact error:** `Unexpected error retrieving remote project status: {"message":"Your account does not have the necessary privileges to access this endpoint. ..."}`
+- **Cause:** `SUPABASE_ACCESS_TOKEN` is a scoped token without the scopes the pinned CLI 3.2.0 lists in
+  `--help` (PERMISSIONS): `link` requires `project_admin_read` (may need `projects_read`,
+  `branching_production_read`, `database_pooling_config_read`); `db diff --remote` may need `projects_read`,
+  `database_pooling_config_read`, `branching_production_read` and also lists `database_write`.
+- **Tension:** the drift check is meant to be read-only, but the CLI may ask for `database_write`. The person
+  decides whether to grant it or to have the diff use only the DB password with a read-only role (follow-up).
+- **Production migration history (read-only, via the Supabase connector's list_migrations):** empty. The init
+  migration `20261125104017` is not applied, so the Supabase GitHub integration hasn't deployed yet. The
+  person checks the integration (production branch `main`, directory `supabase`, "Deploy to production" on).
+  Nothing was changed in production.
+- **Note (AGENT_RULES 13):** the Supabase connector on this machine also exposes write tools
+  (`execute_sql`, `apply_migration`). They were not used and must never be used against production.
