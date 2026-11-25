@@ -4,7 +4,7 @@
 |-------|-------|
 | State | BLOCKED |
 | Owner role | git-release, devops-cicd |
-| Branch | `main` (Phase 0 exception: the repo was empty, so the initial commit goes to `main` directly, before branch protection) |
+| Branch | `main` for the first two commits (Phase 0 exception: the repo was empty, before branch protection); then `ci/0-phase0-fixes` (PR #1), `ci/0-gate-hardening` (PR #2), `ci/0-gate-cleanup` (PR #3) |
 | Worktree | none (repo root `C:\Users\tubae\Claude\AutomationTest`) |
 | Depends on | none |
 

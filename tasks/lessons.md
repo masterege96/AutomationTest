@@ -136,7 +136,7 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   fails for any other base, and re-runs on `edited` (retargeted base). Also fixed: S17 (gate judges the
   reported `head.sha`, concurrency group), S18 (drift log shows only a line count and hash, not the diff).
 - **Open (devops-cicd; the person decides):**
-  - S14: a PR can add its own `pull_request` job named `merge-gate`. Suggested: gate-check FAILs when a
+  - S14 (**accepted for the pilot**, see tasks/decisions.md 2026-11-25; fix in plan step 4 with a GitHub App that posts the gate result): a PR can add its own `pull_request` job named `merge-gate`. Suggested: gate-check FAILs when a
     workflow at the PR head defines a job named `merge-gate`/`gate`, or the person accepts the risk.
   - S5: a `tasks/**`-only PR (including `tasks/decisions.md`) passes with stale gate files. Suggested:
     protect `tasks/decisions.md`, and require gate commits in `MB..HEAD` even when there's no code change.
@@ -155,3 +155,17 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   - S26: an odd diff count in drift.yml is reported as `drift=yes` (opens a drift issue, stop rule 1) when
     the check itself broke. Fix: non-numeric → exit 1 without `drift=yes`.
   - S27: drift.yml comment about adding a post-deploy trigger "once the deploy path exists" is now due.
+
+## L12. First drift run fails at `supabase link`: SUPABASE_PROJECT_ID isn't a project ref (open, the person)
+
+- **Seen:** drift run 45613825796 on main (workflow_dispatch, 2026-11-25), step "Link the production project".
+- **Exact error:** `Cannot resolve branch "***": the linked project ref is invalid (checked SUPABASE_PROJECT_ID, supabase/.temp/linked-project.json, supabase/.temp/project-ref). Relink the parent project first: supabase link --project-ref <parent-ref>`
+- **Cause:** Supabase CLI 3.2.0 treats a value that is exactly 20 lowercase letters as a project ref and
+  anything else as a branch name. The stored `SUPABASE_PROJECT_ID` (masked) isn't a 20-letter ref, so it was
+  read as a branch of a not-yet-linked project. Likely the project name, URL or a copy with spaces was stored.
+  The CLI also reads `SUPABASE_PROJECT_ID` from the environment itself.
+- **Fix (the person):** set the `production` environment secret `SUPABASE_PROJECT_ID` to the project's
+  20-character reference ID (Dashboard > Project Settings > General), with no spaces or URL. Then re-run
+  `gh workflow run drift.yml --ref main`. Don't paste the value into chat or files.
+- **Framework fix suggested (devops-cicd):** drift.yml's secrets step should check the ref format
+  (`^[a-z]{20}$`) and fail with this hint, without printing the value.
