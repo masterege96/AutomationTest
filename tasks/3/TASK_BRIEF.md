@@ -1,0 +1,245 @@
+# Task 3: To-do pilot: email login + own to-dos (create, list, toggle done, edit title, delete)
+
+| Field | Value |
+|-------|-------|
+| State | BACKLOG |
+| Owner role | db-architect (`specs/3/schema.md`), security (`specs/3/threat-model.md`, `specs/3/security-gate.md`), db-builder (DB), backend-dev (API, server auth, nonce CSP proxy), frontend-dev (UI), qa-test (tests, `specs/3/test-plan.md`), devops-cicd (scripts, devDependencies, lockfile, `next.config.*` headers block, CI), code-reviewer (`specs/3/review.md`) |
+| Branch | `feat/3-todos` |
+| Worktree | `../wt-3-todos` (single worktree for the whole slice; the roles work in sequence, never at the same time) |
+| Depends on | 2a (EXECUTE revoked on future functions: any function migration grants explicitly), 2b (security headers, local auth defaults, production dashboard checklist incl. item 22) |
+
+The person's request (relayed by the orchestrator, 2026-11-25):
+
+> "Task 3: to-do pilot. Email login (OTP / magic link). Each user can create, list, toggle done, edit title and delete only their own todos. Title 1-200 characters. Acceptance criteria include abuse cases for security-baseline rows #1, #2, #3, #5, #8, #9, #11, #14."
+
+Earlier decisions by the person that apply (tasks/decisions.md, task 2): **Q3** a fixed CSP in `next.config` for now, **a nonce-based CSP with middleware lands in task 3**. **Q4** CAPTCHA (Cloudflare Turnstile) stays off locally and in CI; the production dashboard items are the person's. Also recorded there: S14 (merge-gate spoofing) is accepted for the pilot. This task adds the first real table, and every merge to `main` deploys migrations to production (L11): the orchestrator confirms with the person that the S14 acceptance still covers that before merge.
+
+The orchestrator plans **one PR for the whole slice** (DB + API + UI + tests incl. Playwright e2e and abuse tests).
+
+## Goal
+
+A person can sign in with their email address (one-time code and/or magic link, see Question 5), and then create, see, mark done/undone, rename and delete their own to-dos, and nobody else's. Signing out ends access, and every abuse case below is refused with an observable result.
+
+## Acceptance criteria
+
+Each one is testable; qa-test writes at least one test per line and maps it in `specs/3/test-plan.md`. "The API" means whatever server entry points backend-dev builds for to-dos (style decided in Question 2); "error response" means the status code given plus the error format decided in Question 2, and **never** a stack trace, SQL text, internal ids, or any other user's data. Screen texts in quotes are the exact texts the UI shows (frontend-dev may change wording only by updating this brief first). "User A" and "user B" are two separate confirmed test users on the local stack. "Rows in the DB" is checked as `postgres` on the local database, not through the app.
+
+### Sign-in and sign-out
+
+- [ ] AC1 (sign in, happy path): Given a signed-out visitor on the sign-in screen, when they enter a valid email address and ask for a code, then the screen shows "Check your email for a sign-in code." and exactly one email to that address appears in the local mail server (Mailpit, `[local_smtp]`); when they enter the code from that email, then they land on their to-do list and the header shows their email address. (If the person picks magic link or both in Question 5, the same AC holds for following the link from the email, landing on the list.)
+- [ ] AC2 (first sign-in creates the account): Given an email address with no account, when it completes AC1, then exactly one row exists in `auth.users` for it, confirmed, with an empty to-do list ("No to-dos yet."). (Whether unknown emails may create accounts at all is Question 6; this AC assumes the recommended default.)
+- [ ] AC3 (invalid email): Given the sign-in screen, when the email field is empty, `not-an-email`, or longer than 254 characters, then the screen shows "Enter a valid email address.", no request reaches the auth service, and no email is sent.
+- [ ] AC4 (wrong code): Given a code was requested, when a wrong 6-digit code is entered, then the screen shows "That code is wrong or has expired. Request a new code.", no session cookie is set, and the to-do list is not reachable.
+- [ ] AC5 (used / expired code): Given a code that was already used to sign in (single use), when it is entered again after signing out, then the result is the same as AC4. Expiry itself (900 s, `otp_expiry`) is proven by the existing static config test in `tests/integration/auth-config.test.ts`, not by waiting 15 minutes.
+- [ ] AC6 (no account enumeration): Given one email address with an account and one without, when a code is requested for each, then both show the same screen text as AC1 and the auth response status is the same.
+- [ ] AC7 (resend too fast): Given a code was requested for an address less than 60 s ago (`max_frequency = "60s"`), when another code is requested for the same address, then the screen shows "Please wait a minute before requesting another code." and no second email arrives in Mailpit. If the local stack does not enforce this (compare L21), qa-test records the observed result in the Handoff and security decides, as in 2b.
+- [ ] AC8 (sign out): Given user A is signed in, when they click "Sign out", then they see the sign-in screen, the browser holds no Supabase session cookie, reloading the list or using the browser Back button shows the sign-in screen (no cached to-dos are shown), and an API request replayed with A's pre-sign-out cookies returns 401 with no data. security states in the threat model whether a captured access token must stop working at sign-out or may live until it expires (`jwt_expiry = 3600`); qa-test asserts the chosen behavior.
+- [ ] AC9 (signed-out access): Given no session, when the to-do list page is opened directly, then the sign-in screen is shown and no to-do data is in the HTML or network responses; when any to-do API is called (list, create, change, delete), then it returns 401 and the DB is unchanged.
+
+### To-dos, happy paths
+
+- [ ] AC10 (create): Given user A is signed in, when they type "Buy milk" and press "Add", then "Buy milk" appears at the top of the list, not done, and exactly one row exists in the DB with that title, `user_id` = A's id, done = false.
+- [ ] AC11 (list): Given A has 3 to-dos and B has 2, when A opens the list, then exactly A's 3 appear, newest first, and none of B's titles are in the HTML or any network response.
+- [ ] AC12 (toggle done): Given A's to-do is not done, when A checks it, then it shows as done (checkbox checked and title struck through), the DB row has done = true, and after a reload it is still done; when A unchecks it, the same holds for not done.
+- [ ] AC13 (edit title): Given A's to-do "Buy milk", when A edits the title to "Buy oat milk" and saves, then the list shows "Buy oat milk", the DB row has the new title, and its done state and owner are unchanged.
+- [ ] AC14 (delete): Given A's to-do, when A deletes it, then it disappears from the list, the DB row is gone, and after a reload it does not come back. (Delete is permanent and needs no undo in this task.)
+- [ ] AC15 (persistence across sessions): Given A created to-dos, when A signs out and signs in again (on a new browser context), then the same to-dos with the same done states are listed.
+
+### Title validation (row 5)
+
+The title rule: leading and trailing whitespace is trimmed, then the title must be **1 to 200 characters**, counted as Unicode code points (as Postgres `char_length` counts them), so the API and the DB agree. The trimmed title is what is stored.
+
+- [ ] AC16 (boundaries accepted): Given A is signed in, when a title of exactly 1 character, exactly 200 characters, 200 emoji (each one code point, e.g. 200 x U+1F600), or "  Buy milk  " is submitted on create and on edit, then each is accepted and stored ("Buy milk" without the spaces).
+- [ ] AC17 (invalid titles rejected): Given A is signed in, when create or edit is sent with a title that is empty `""`, whitespace-only (`"   "`, tabs, newlines), 201 characters, 201 characters after trimming, a number, `null`, `true`, an array, an object, or missing, then the API returns 400 with the error format, no row is created or changed, and the UI (for the cases a user can type) shows "Title must be 1 to 200 characters." and keeps the input.
+- [ ] AC18 (other invalid input): Given A is signed in, when the API gets a body that isn't JSON, a body over 10 KB, a to-do id that isn't a valid id format, or a done value that isn't a boolean (`"true"`, `1`, `null`), then it returns 400 (or 413 for the oversized body) with the error format and the DB is unchanged.
+- [ ] AC19 (DB enforces it too): Given the local database, when an insert or update on the to-do table as an authenticated user (directly through PostgREST with A's token, bypassing the app) sets a title of `""`, `"   "` or 201 characters, then the database rejects it (CHECK constraint) and no row is written. pgTAP tests cover this.
+
+### Abuse cases by security-baseline row
+
+**Row 1 (type `/admin`):** this task has no admin role or admin feature.
+
+- [ ] AC20: Given signed-out and signed-in (A) requests, when `/admin`, `/api/admin` and `/api/admin/todos` are requested, then each returns 404 and no data. No route, API or UI checks a role from `user_metadata`.
+- [ ] AC21 (server checks, not only the proxy): Given no session, when every to-do API is called with a forged `x-middleware-subrequest` header (and any other header security names in the threat model as a middleware/proxy bypass), then each still returns 401 and the DB is unchanged. Each API checks the session itself on the server; the proxy is not the only check.
+
+**Row 2 (IDOR, change the id):**
+
+- [ ] AC22: Given B owns to-do X, when A (signed in) reads, toggles, edits or deletes X by its id through the API, then each returns 404 (the same status and body as for an id that doesn't exist), X is unchanged in the DB (title, done, owner), and no field of X appears in the response.
+- [ ] AC23: Given B owns to-do X, when A calls the Supabase REST API directly with the anon key and A's access token to select, update or delete X, then 0 rows are returned or affected and X is unchanged.
+
+**Row 3 (API key in the browser):**
+
+- [ ] AC24: Given a production build (`npm run build`), when verify.sh scans the client bundle, then "client bundle has no server secrets" passes; client code reads only `NEXT_PUBLIC_*` env vars; `SUPABASE_SERVICE_ROLE_KEY` is not used by any to-do or sign-in code path (if security approves a need for it, it is server-only and that code does its own ownership check, standing rule 3).
+- [ ] AC25: Given the app running in a browser, when every network request and response during AC1-AC14 is recorded (Playwright), then no request or response contains the service-role key, the database password, or any other secret value; the only Supabase key in the browser is the publishable/anon key. No secret appears in a test file, fixture or log: local keys come from `npx supabase status` at run time.
+
+**Row 5 (bad input):** AC16-AC19 above, plus:
+
+- [ ] AC26 (abuse test): The `tests/abuse/**` suite sends each invalid case from AC17 and AC18 to every to-do API as user A and asserts 400/413 and an unchanged DB.
+
+**Row 8 (admin at signup / mass assignment):**
+
+- [ ] AC27: Given a sign-in request that sends `data: {"role": "admin", "is_admin": true}` (user metadata) for a new email, when that user signs in, then `raw_app_meta_data` has no role/admin field, and the user can only see and change their own to-dos (AC22/AC23 hold for them).
+- [ ] AC28 (create, mass assignment): Given A is signed in, when create is sent with extra fields `user_id` = B's id, `id` = a chosen id, `done` = true, `created_at` = a past date, or any unknown field, then the API returns 400 with the error format and no row is created (strict field whitelist: create accepts only the title).
+- [ ] AC29 (change, mass assignment): Given A owns to-do X, when a change request for X sends `user_id` = B's id, `id` = another id, `created_at`, or any unknown field (with or without a valid title/done), then the API returns 400, and X is unchanged and still owned by A. A change request may set only the title and/or the done flag.
+- [ ] AC30 (DB level): Given A's token directly against the Supabase REST API, when A inserts a to-do with `user_id` = B's id, or updates A's own to-do to `user_id` = B's id, then the database rejects it (RLS `with check`) and no row is owned by B as a result.
+
+**Row 9 (guess the login code):**
+
+- [ ] AC31: Given the local stack, when 10 wrong codes are entered for one address through the UI, then each shows the AC4 message and no session is ever created. The local stack does **not** enforce the per-IP verify limit (lesson L21), so **this test does not prove row 9 and must not be counted as its proof**.
+- [ ] AC32 (row 9 proof): Row 9 is proven by (a) the static config test in `tests/integration/auth-config.test.ts` (S5 `token_verifications = 5` (< 10), `otp_expiry = 900`, `otp_length = 6`, `max_frequency = "60s"`) staying green after any `supabase/config.toml` change in this task, and (b) **2b dashboard checklist item 22** (10 wrong-code verify requests against production give 429 at or before attempt 6 and on every later attempt), run by the person after the first production deploy, recorded in `tasks/decisions.md`. All sign-in code verification goes through Supabase Auth's verify endpoint; the app adds no own code check, retry loop or endpoint that bypasses its rate limits (security confirms in the threat model).
+- [ ] AC33 (CAPTCHA): Given local and CI, then `[auth.captcha]` stays off (2b S-tests unchanged), per decision Q4. Turning CAPTCHA on in production is tied to Question 4.
+
+**Row 11 (XSS):**
+
+- [ ] AC34: Given A is signed in, when A creates or edits to-dos titled `<script>window.__xss=1</script>`, `<img src=x onerror="window.__xss=1">`, `"><svg onload="window.__xss=1">` and `javascript:window.__xss=1`, then each title is shown as the literal text in the list and in the edit field, `window.__xss` stays undefined, no dialog opens, and the DB stores the text unchanged (not stripped or HTML-escaped in storage). verify.sh's `dangerouslySetInnerHTML` check passes.
+- [ ] AC35 (nonce CSP, header): Given a production build (`npm run build` + `npm start`), when `/`, the sign-in screen, the to-do list page, a 404 page and one API response are requested, then each response has exactly one `Content-Security-Policy` header whose `script-src` contains a `'nonce-…'` value and does **not** contain `'unsafe-inline'` (dev mode may keep `'unsafe-eval'` only as security specifies); two requests to the same page get different nonces; the other five 2b headers (`X-Frame-Options`, `Referrer-Policy`, `X-Content-Type-Options`, `Permissions-Policy`, `Strict-Transport-Security`) are still present with their 2b values. Exact CSP value comes from `specs/3/threat-model.md`; `tests/integration/security-headers.test.ts` is updated to match.
+- [ ] AC36 (nonce CSP, page works): Given the production build in a browser, when the e2e run goes through AC1, AC10, AC12, AC13, AC14 and AC8, then every page renders and hydrates, all of the app's own scripts run (they carry the nonce), calls to the local Supabase URL are allowed by `connect-src`, and the console shows no CSP violation.
+- [ ] AC37 (nonce CSP, injected script blocked): Given the to-do list page of the production build, when the test injects an inline `<script>` without the nonce (e.g. `window.__csp=1`) into the page, then the script does not run (`window.__csp` stays undefined) and the browser fires a `securitypolicyviolation` event (and console error) naming `script-src` or `script-src-elem`. A CSP reporting endpoint (`report-uri`/`report-to`) is out of scope unless security requires it.
+
+**Row 14 (query your database):**
+
+- [ ] AC38: Given the local database after `npx supabase db reset`, then the to-do table has RLS enabled with policies that limit select, insert, update and delete to the owner (`auth.uid()`); verify.sh "RLS enabled on every public table" passes; `npx supabase db lint` reports no errors.
+- [ ] AC39: Given the anon key and no user token, when the to-do table is queried, inserted into, updated or deleted from through the Supabase REST API, then nothing is returned or changed (error or 0 rows). pgTAP tests check this as role `anon`.
+- [ ] AC40 (explicit grants, L14): Given the migration, then it grants exactly the table privileges the app needs to `authenticated` and none to `anon` (production's default privileges grant nothing, L14; task 1 already revoked TRUNCATE/TRIGGER/REFERENCES/MAINTAIN), and any function it adds grants EXECUTE explicitly (task 2a). pgTAP tests assert these grants with `table_privs_are` / `function_privs_are` (or equivalent).
+- [ ] AC41: No SQL is built from string concatenation of request input anywhere in the slice (code-reviewer checks; security lists it in the gate).
+
+### Duplicate and rapid actions
+
+- [ ] AC42 (double submit): Given A types a title, when "Add" is clicked twice quickly (or Enter pressed twice), then exactly one to-do is created (the control is disabled while the first request is pending).
+- [ ] AC43 (repeat toggle): Given A's to-do X, when two "mark done" requests for X are sent (sequentially and in parallel), then both succeed, X is done, and it stays done (marking done is idempotent; the same holds for "mark not done"). When the checkbox is clicked 5 times quickly in the UI, then after the requests settle and a reload, the UI and the DB show the same done state.
+- [ ] AC44 (act on a deleted to-do): Given A deleted X in one tab, when A toggles, edits or deletes X again from a second tab, then the API returns 404, the second tab shows "This to-do no longer exists." and removes it from the list, and no row is created.
+- [ ] AC45 (parallel creates): Given A, when 20 create requests with different titles are sent in parallel, then exactly 20 rows exist for A, each with its own title, and none for any other user.
+
+### Release, build and gates
+
+- [ ] AC46 (not released to real users yet): Sign-in is not opened to real users (no production URL announced, no real sign-ups) until the person has recorded in `tasks/decisions.md` that 2b dashboard checklist **item 22 passed**, and items 1 (custom SMTP), 21 (site URL / redirect URLs) and, per Question 4, item 9 (Turnstile) are done. Merging this PR does deploy the migration to production (Supabase integration); that is allowed, the table stays empty. git-release records the release state in the Handoff.
+- [ ] AC47: `npm run typecheck`, `npm run lint`, `npm test`, `npm run test:e2e` (new script, Playwright) and `npm run build` pass; `bash scripts/verify.sh --brief tasks/3/TASK_BRIEF.md` passes with the local stack, and its summary line is in the Handoff; CI is green (see Question 3 for what CI needs); security gate PASS; review APPROVE.
+- [ ] AC48: `specs/3/test-plan.md` maps every AC above and every applicable security row to a test file, test name and level (pgTAP, integration, abuse, e2e, static, or manual with the reason).
+
+## Security rows that apply
+
+Flagged by product-spec; security confirms, fills in and may add rows during Design (`specs/3/threat-model.md`). Rows 4, 6, 7, 10, 12 are N/A per PROJECT_CONTEXT (security confirms; row 7 note: a sign-in code is single use, which Supabase Auth enforces; AC5 tests it). Row 13 is covered by the CI secret scan.
+
+- [ ] Row 1: abuse test: AC20, AC21
+- [ ] Row 2: abuse test: AC22, AC23
+- [ ] Row 3: abuse test: AC24, AC25
+- [ ] Row 5: abuse test: AC16-AC19, AC26
+- [ ] Row 8: abuse test: AC27-AC30
+- [ ] Row 9: abuse test: AC31 (not proof, L21); proof: AC32 (static S5 + production item 22)
+- [ ] Row 11: abuse test: AC34; CSP: AC35-AC37
+- [ ] Row 14: abuse test: AC38-AC41
+- [ ] Also for security to decide (not a baseline row): cross-site requests. If the API authenticates by cookie, a state-changing request with a foreign `Origin` (e.g. `https://evil.example`) and A's valid cookies is refused (403) and changes nothing; session cookie flags (`Secure` in production, `SameSite`, `HttpOnly` where possible); if magic link is chosen, the post-login redirect only goes to this app's own paths (a `next`/`redirect_to` of `https://evil.example` is ignored). Sign-out semantics (AC8).
+
+## Scope
+
+**Allowed paths** (union for the whole slice; verify.sh reads only this one block for the branch. Per-role split in the table below; each role touches only its own rows.)
+
+```
+# db-builder
+supabase/migrations/**
+supabase/tests/**
+# backend-dev (Next 16 may call the request interceptor proxy.ts instead of middleware.ts: backend-dev confirms from node_modules/next/dist/docs and uses one)
+app/api/**
+lib/server/**
+middleware.ts
+proxy.ts
+types/database.ts
+# frontend-dev (app/** except app/api/**, which is backend-dev's)
+app/**
+components/**
+lib/client/**
+# qa-test
+tests/integration/**
+tests/e2e/**
+tests/abuse/**
+playwright.config.*
+# devops-cicd (package.json: scripts and devDependencies only; dependencies only as approved in Question 1)
+package.json
+package-lock.json
+next.config.*
+vitest.config.*
+supabase/config.toml
+supabase/templates/**
+.github/workflows/**
+# db-architect, security, qa-test, code-reviewer specs
+specs/3/**
+```
+
+| Role | Paths it may change in this task | Notes |
+|------|-----------------------------------|-------|
+| db-architect | `specs/3/schema.md` | Design only |
+| security | `specs/3/threat-model.md`, `specs/3/security-gate.md` | Gives the exact nonce CSP value, sign-out semantics, cross-site rule |
+| db-builder | `supabase/migrations/**`, `supabase/tests/**` | Avoid the bare word `truncate` in migrations, even in comments (L15 false positive) |
+| backend-dev | `app/api/**`, `lib/server/**`, `middleware.ts` or `proxy.ts`, `types/database.ts` (generated) | Confirm the middleware/proxy file name and the nonce pattern (incl. its effect on `cacheComponents` / `partialPrefetching` and static rendering) from `node_modules/next/dist/docs`, per AGENTS.md. The type-generation command isn't in PROJECT_CONTEXT's Commands table: propose it, don't invent it |
+| frontend-dev | `app/**` except `app/api/**`, `components/**`, `lib/client/**` | First component and page examples in the repo (PROJECT_CONTEXT: "the first feature task sets the example") |
+| qa-test | `tests/integration/**`, `tests/e2e/**`, `tests/abuse/**`, `playwright.config.*`, `specs/3/test-plan.md` | Updates `tests/integration/security-headers.test.ts` (CSP moves to the nonce policy) and `auth-config.test.ts` if config.toml changes |
+| devops-cicd | `package.json` (scripts, devDependencies), `package-lock.json`, `next.config.*` headers block, `vitest.config.*`, `supabase/config.toml`, `supabase/templates/**`, `.github/workflows/**` (only if CI needs a local stack env or Playwright browsers, Question 3) | `vitest.config.*` is likely needed so Vitest doesn't pick up Playwright `*.spec.ts` files. `supabase/templates/**` (sign-in email templates, if the code must appear in the email) is not in the ownership map yet: the orchestrator confirms it goes to devops-cicd with `supabase/config.toml`. `.github/workflows/**` changes need the person's `framework-change-approved` label |
+| code-reviewer | `specs/3/review.md` | |
+
+**Size (rule 2):** this slice will very likely exceed the ~400 changed-line guideline (migration + pgTAP, API, proxy, UI, integration/abuse/e2e tests, config). The orchestrator chose one PR for the whole slice on purpose; reviewers should expect a large diff and review it per role (commits per role).
+
+**Out of scope:**
+- Password sign-in, social/OAuth providers, phone/SMS, passkeys, MFA, account deletion, changing the email address, profile pages.
+- Admin role or admin features (row 1 here means only "no admin surface exists and nothing trusts metadata").
+- Sharing to-dos, lists/projects, due dates, priorities, reordering, search, filters, pagination, bulk actions, undo after delete, soft delete, offline mode, realtime sync between tabs (AC44 covers stale tabs).
+- The Turnstile widget in the login form (unless the person answers Question 4 otherwise), a CSP reporting endpoint (unless security requires it), choosing an app host / production URL.
+- Any production change by an agent: dashboard settings (items 1-22) are the person's (AGENT_RULES §4).
+- Framework files (`scripts/**`, `rules/**`, `roles/**`, `ORCHESTRATOR.md`, `templates/**`) and drive-by changes to existing migrations (never edit a merged migration).
+
+## Inputs
+
+- Spec files: `specs/3/schema.md` (db-architect), `specs/3/threat-model.md` (security), `specs/3/test-plan.md` (qa-test)
+- Other:
+  - `rules/security-baseline.md` rows 1, 2, 3, 5, 8, 9, 11, 14; `rules/database-and-deploy.md`.
+  - `specs/2b/threat-model.md` (current CSP and the other five headers, section B auth values, S-tests), `specs/2b/security-gate.md` (P1 = item 22), `tasks/2b/TASK_BRIEF.md` Handoff (dashboard checklist items 1-22; note: header values are fixed at `next build`, so `NEXT_PUBLIC_SUPABASE_URL` must be set at build time while the CSP stays in `next.config`).
+  - `tests/integration/security-headers.test.ts`, `tests/integration/auth-config.test.ts` (existing tests this task changes or must keep green).
+  - `supabase/config.toml`: `site_url = "http://127.0.0.1:3000"`, `additional_redirect_urls = ["https://127.0.0.1:3000"]` (note https vs http; matters if magic link is chosen), `enable_signup = true`, `[auth.email]` `otp_length = 6`, `otp_expiry = 900`, `max_frequency = "60s"`, `[local_smtp]` (Mailpit) for reading codes in tests.
+  - `tasks/lessons.md`: **L18** (CI `verify` job sets no local-stack env vars; verify.sh now starts the DB before project checks, so tests may use the stack locally), **L19/L23** (shared `tasks/board.md` / `tasks/lessons.md` cause merge conflicts and no CI run: merge main early, before the gates), **L21** (local stack doesn't enforce per-IP auth limits), **L22** (merge main before running the gates, not after), **L14** (explicit grants), **L15** (`truncate` false positive), **L5** (`--passWithNoTests` can now go, tests exist).
+  - verify.sh order: `test:e2e` runs **before** `build`, so the Playwright config must start its own production server (build included) for the CSP ACs, or devops-cicd defines the script so it does.
+  - Env var names for tests/CI pointing at the local stack (URL, anon key) are not in PROJECT_CONTEXT yet: propose names in the Handoff (no values), the person approves.
+  - `AGENTS.md`: Next.js 16 differs from training data; read `node_modules/next/dist/docs/` before writing Next code.
+
+## Destructive change?
+
+- [x] No (adds a table, policies, grants, routes, UI and tests; drops or renames nothing; no data touched).
+- [ ] Yes: step 1 (stop using it) is task ___; step 2 (drop) is this task. Backup step: ___. Person approved on: ___
+
+## Questions for the person
+
+Each has a recommended default. The task stays in `BACKLOG` until they're answered (the orchestrator records the answers in `tasks/decisions.md` and here).
+
+1. **New dependencies (AGENT_RULES §8; versions are picked by the role that adds them, pinned exactly).** The slice needs:
+   (a) Supabase client libraries for Next.js server and browser auth (cookie-based sessions in server code and the proxy: the Supabase JS client plus its SSR helper package), in `dependencies`;
+   (b) a schema validation library for the API boundary (row 5; the baseline names zod), in `dependencies`;
+   (c) Playwright test runner plus its browser download, in `devDependencies` (adds the `test:e2e` script).
+   **Recommended:** approve all three (Supabase's official JS + SSR packages, zod, Playwright with Chromium only). Without (a) sign-in needs hand-written cookie/session code (higher risk); without (c) AC36/AC37 and the e2e ACs can't be automated.
+2. **API style and error format** (PROJECT_CONTEXT: backend-dev proposes, you decide). Options, not decided here:
+   (a) Route handlers under `app/api/**` (REST-like JSON endpoints, e.g. list/create/change/delete), called from client components;
+   (b) Server Actions called from forms/components (no public URL per action, but still reachable by POST and must be checked like an API);
+   (c) the browser talks to Supabase directly (PostgREST) with RLS as the only server check, no own API.
+   Error format options: a small JSON object such as `{ "error": { "code": "...", "message": "..." } }`, or RFC 9457 problem+json. **Recommended:** let backend-dev propose one of (a)/(b) with an error format in this brief's Handoff during Design (before building), and you pick; (c) weakens rows 5 and 8 (no server-side whitelist beyond DB constraints) and is not recommended. The ACs above are written to hold for (a) or (b).
+3. **CI for tests that need the local stack or Playwright.** The `verify` job doesn't set the local Supabase URL/keys (L18) and has no Playwright browsers. Running the auth/abuse/e2e tests in CI needs `.github/workflows/**` changes (devops-cicd), which is a framework path: the PR needs your `framework-change-approved` label (only you add it, AGENT_RULES 18a). **Recommended:** yes, add it in this PR: the verify job reads the local URL and keys from `npx supabase status` at run time (never stored), installs the pinned Playwright Chromium, and runs `test:e2e`. Alternative: e2e and live auth tests run only locally and are recorded in the Handoff (weaker: nothing stops a regression in CI).
+4. **Production auth dashboard (the person's items; agents never change production).**
+   (a) Site URL and redirect URLs (item 21): the production URL isn't decided (no app host chosen). **Recommended:** leave unset until you choose a host; AC46 keeps sign-in unreleased until then.
+   (b) Email template: if sign-in uses a typed code, the production "magic link" and "confirm signup" email templates must show the code (`{{ .Token }}`), not only a link. **Recommended:** you edit both templates in the dashboard when you set up SMTP (item 1); devops-cicd mirrors them locally in `supabase/templates/**` so local tests see the same email.
+   (c) Turnstile timing (item 9): CAPTCHA on in production breaks sign-in unless the login form sends a Turnstile token, which needs the widget, a new public site-key env var and CSP allowances for Cloudflare. **Recommended:** keep the widget out of this task; make it a small follow-up task (3b) before release; turn item 9 on together with 3b. AC46 blocks real users until then.
+5. **Sign-in method: 6-digit code, magic link, or both?** The request says "OTP / magic link", which can be read either way. **Recommended:** **code only** for this task: it works without a decided production URL and redirect allow-list, works when the email is opened on another device, isn't consumed by email link scanners, keeps the e2e test simple (read the code from Mailpit), and every attempt goes through the rate-limited verify endpoint (row 9). Magic link (with a callback route, redirect allow-list and open-redirect tests) can be added later.
+6. **Who may sign up?** Today `enable_signup = true` and a first code request for an unknown email creates the account (AC2). **Recommended:** keep open sign-up for the pilot (anyone with an email can create their own empty list), since AC46 keeps it unreleased until the production checklist is done. Alternative: invite-only (only emails you add can sign in), which needs an extra admin flow and is out of scope.
+
+---
+
+## Handoff (each role appends; never delete earlier entries)
+
+### product-spec, 2026-11-25
+
+- **Changed:** `tasks/3/TASK_BRIEF.md` (new), `tasks/board.md` (row 3 added).
+- **Verified:** `bash scripts/bootstrap-check.sh --offline`: `PASS 29/29 (1 skipped)`. Read the current `supabase/config.toml` (auth keys cited above), `next.config.ts` (static CSP with `'unsafe-inline'` in `script-src`), `package.json` (no Supabase client, validation or Playwright dependency yet; `test` still `--passWithNoTests`), `.gitignore` (already ignores `playwright-report/`, `test-results/`), `scripts/verify.sh` (scope check reads the first fenced block after the words "Allowed paths"; bundle secret scan; RLS static check; `test:e2e` runs before `build`), `.github/workflows/ci.yml` (no Playwright, no stack env in `verify`). `node_modules` isn't installed in this worktree, so the Next 16 middleware/proxy name was not checked: backend-dev confirms.
+- **Left to do:** the person answers Questions 1-6; db-architect writes `specs/3/schema.md`; security writes `specs/3/threat-model.md` (exact nonce CSP, sign-out semantics, cross-site rule, confirms N/A rows); qa-test writes `specs/3/test-plan.md`; orchestrator sets `SPEC_READY`.
+- **Next role must know:**
+  - Choices product-spec made that the person or security may overturn (flagged, not asked): titles are trimmed and counted in Unicode code points; list is newest first; extra fields are rejected with 400 (not silently dropped); marking done is idempotent ("set", not "flip"); not-found and not-yours give the same 404; delete is permanent; a 10 KB body limit; the exact screen texts in quotes. If any of these is wrong, product-spec updates the AC before building.
+  - Never write the words "Allowed paths" above the Scope section of this brief: verify.sh starts reading at their first occurrence and takes the next fenced block.
+  - CSP: keep exactly one `Content-Security-Policy` header per response; when the nonce policy moves into the proxy, the CSP entry in `next.config.*` goes away (devops-cicd) and the header test changes (qa-test), in the same PR.
+
+## Blocked (fill in only when BLOCKED)
+
+- **Missing:**
+- **Who must provide it:**
