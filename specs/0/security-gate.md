@@ -1,77 +1,93 @@
 Result: PASS
 
-# Security gate: task 0, drift artifact (`ci/0-drift-artifact`)
+# Security gate: task 0, drift artifact (`ci/0-drift-artifact`), re-run
 
 - **Reviewer:** security (fresh context, no builder conversation; judged from the repo only)
 - **Date:** 2026-11-25
-- **Branch / HEAD reviewed:** `ci/0-drift-artifact` @ `8a353f3`, diff `git diff origin/main...HEAD` (3 files, +18/-1): `.github/workflows/drift.yml`, `roles/devops-cicd.md`, `tasks/decisions.md`
-- **Decision this relies on:** `tasks/decisions.md:12` (the person keeps the repo public and allows a manual drift run to upload the raw diff as a 1-day artifact with `upload_diff=true`; schedule and default runs never expose it).
+- **Branch / HEAD reviewed:** `ci/0-drift-artifact` @ `e643765`, diff `git diff origin/main...HEAD` (`.github/workflows/drift.yml`, `roles/devops-cicd.md`, `tasks/decisions.md`, `specs/0/review.md`, `specs/0/security-gate.md`). Focus: `e643765` (fix for S28 and S29 from the previous gate, `0f0a026`).
+- **Decision this relies on:** `tasks/decisions.md:12` (repo stays public; a manual run with `upload_diff=true` may upload the raw diff as a 1-day artifact; schedule and default runs never expose it).
 
 ## Applicable baseline rows
 
 Row 13 (no secrets in files / logs / artifacts) and the drift check (rules/database-and-deploy.md rule 7). Rows 1-12 and 14: nothing new (no app code, routes, tables, migrations, env vars or client code).
 
-### The upload step can't run on schedule or a default dispatch
+## S29 (partial diff upload): fixed
 
-Step: `drift.yml:95-102`, `if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && hashFiles('diff.sql') != ''`.
+| Check | Proof | Result |
+|---|---|---|
+| `diff_ok` set only after a successful CLI run | `drift.yml:79-83`: `if ! npx ... supabase db diff ... >diff.sql 2>diff.err; then ... exit 1; fi`, then `echo "diff_ok=true" >> "$GITHUB_OUTPUT"`. Any non-zero CLI exit leaves the step before `diff_ok` is written. | PASS |
+| No-drift case | `diff_ok=true`, `drift=no`, step exits 0. | PASS |
+| Drift case | `diff_ok=true` is written before the content check, then `drift=yes` and `exit 1`. Outputs written before a step fails are kept (the issue step already relies on `drift=yes` from the same failed step), so the opt-in upload path still works for the drift case. | PASS |
+| CLI failure never uploads | `diff_ok` absent, so install, scan and upload (`drift.yml:100, 105, 120`) all require `steps.diff.outputs.diff_ok == 'true'` and are skipped. If the diff step never ran (secrets missing, `npm ci`/link failed), the output is empty: skipped too. The old `hashFiles('diff.sql') != ''` term is gone. | PASS |
+| Scratch test (diff step extracted verbatim from the parsed YAML, fake `npx`, `bash -e`) | CLI exit 1 with partial stdout: exit 1, outputs empty. CLI exit 2 with SQL on stdout: exit 1, outputs empty. Exit 0 comment-only: `diff_ok=true drift=no`, exit 0. Exit 0 with SQL: `diff_ok=true drift=yes`, exit 1. | PASS |
+
+## S28 (no secret scan before upload): fixed
+
+Scan step `drift.yml:103-117`, install step `drift.yml:99-101` (`scripts/ci/install-gitleaks.sh`: pinned `8.30.1`, same as `ci.yml:18`, release checksum verified with `sha256sum -c`, `set -euo pipefail`).
+
+| Check | Proof | Result |
+|---|---|---|
+| Scans a directory holding only `diff.sql` | `SCAN_DIR=$(mktemp -d); cp diff.sql "$SCAN_DIR/"`; `--source "$SCAN_DIR"`. Scratch test (fake gitleaks listing its `--source`): the dir contains only `diff.sql`; `diff.err`, `supabase/.temp` and the repo are not in it. | PASS |
+| Flags | `detect --no-git --source <dir> --redact --no-banner --log-level error --exit-code 99` (as seen by the fake binary). | PASS |
+| `set +e` / `set -e` under the default `bash -e {0}` shell | `set +e` before the gitleaks call, `RC=$?`, `set -e` after, then `case`. Without `set +e` a non-zero exit would kill the step before `RC` is read; with it, every code reaches the `case`. A failing `mktemp`/`cp` (before `set +e`) fails the step without writing `clean`. | PASS |
+| Output not printed | `>/dev/null 2>&1` on the gitleaks call; no report file (`--report-path` not used). Scratch test: a fake gitleaks printing a fake finding to stdout and stderr left nothing in the step log. | PASS |
+| Exit 0 | `clean=true` written, "gitleaks: diff.sql clean", step exit 0. | PASS (tested) |
+| Exit 99 | `::error::possible secret in production schema, not uploaded`, exit 1, no `clean`. | PASS (tested) |
+| Exit 1 (gitleaks error) | `::error::gitleaks could not run (exit 1), diff not uploaded`, exit 1, no `clean`. | PASS (tested) |
+| Exit 127 (gitleaks not installed, e.g. the install step failed; the scan step still runs via `always()`) | same message with `exit 127`, exit 1, no `clean`. | PASS (tested) |
+| Upload requires the scan | upload `if:` ends `&& steps.scan.outputs.clean == 'true'`; `clean` is written only on RC 0. Scan skipped or failed: empty, upload skipped. | PASS |
+| Config | no `.gitleaks.toml` in the repo, and the temp dir has none, so gitleaks uses its default rules with no allowlist (nothing can be allowlisted from a PR branch). | PASS |
+
+Scratch scripts: `C:\Users\tubae\AppData\Local\Temp\claude\e4b8eed453e91105\e97f8da3-6e6c-41cc-8dbd-b960c5b83aaf\scratchpad\t\` (`scan.sh`, `diffstep.sh` extracted from the parsed YAML).
+
+## The schedule and the default dispatch never install, scan or upload
+
+All three new steps share the prefix `always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true'`.
 
 | Case | Evaluation | Result |
 |---|---|---|
-| `schedule` | `github.event_name == 'workflow_dispatch'` is false; also `inputs` is empty on schedule, so `inputs.upload_diff` is null (falsy). Two independent false terms. | skipped. PASS |
-| `workflow_dispatch`, default | input is `type: boolean`, `default: false` (`drift.yml:9-13`). The `inputs` context keeps the boolean type, so `inputs.upload_diff` is `false`. The classic pitfall (`github.event.inputs.upload_diff` is the string `'false'`, which is truthy) is avoided: the expression uses `inputs.`, not `github.event.inputs.`. | skipped. PASS |
-| `workflow_dispatch`, `upload_diff=true` | all terms true if `diff.sql` exists. | runs (intended, accepted) |
-| `always()` | Needed so the step still runs after the diff step exits 1 on drift (the case worth investigating). It does not widen the trigger: the other three terms are ANDed. If an earlier step failed before the diff (missing secrets, `npm ci`, link), `diff.sql` does not exist, `hashFiles` returns `''`, step skipped. On cancel, same terms apply. | PASS |
-| Effect on the drift issue | The upload step does not change `failure()`/`steps.diff.outputs.drift`, so the issue step (`drift.yml:104`) behaves as before; the issue body still has no diff. | PASS |
+| `schedule` | `github.event_name == 'workflow_dispatch'` false; `inputs.upload_diff` null. Install, scan, upload skipped. | PASS |
+| `workflow_dispatch`, default | `upload_diff` is `type: boolean`, `default: false` (`drift.yml:9-13`); `inputs.upload_diff` keeps the boolean (the expression uses `inputs.`, not the string-typed `github.event.inputs.`), so `false`. All three skipped. | PASS |
+| `workflow_dispatch`, `upload_diff=true`, CLI failed | `diff_ok` empty: all three skipped. | PASS |
+| `workflow_dispatch`, `upload_diff=true`, CLI exit 0 | install + scan run; upload only with `clean == 'true'`. | intended |
+| `always()` | lets the steps run after the diff step's drift `exit 1` (or a cancel); every other term is ANDed, so it never widens the trigger. | PASS |
+| Issue step `failure() && steps.diff.outputs.drift == 'yes'` | a scan failure without drift does not open an issue (`drift` is `no`); the issue body still never contains the diff. | PASS |
 
-Workflow parses: loaded with `js-yaml` from `node_modules`; `on` has `schedule` + `workflow_dispatch.inputs.upload_diff {type: boolean, default: false}`, and the step's `if`/`with` come out as written.
+Workflow parses with `js-yaml` from `node_modules`: `on` = `schedule` + `workflow_dispatch.inputs.upload_diff {type: boolean, default: false}`; step `id`s `diff` and `scan` and all `if:` strings come out as written.
 
-### Only `diff.sql` is uploaded
+## Unchanged from the previous gate (re-checked)
 
-| Check | Proof | Result |
-|---|---|---|
-| Path | `path: diff.sql` (single literal file, no glob, no directory). `diff.err` (CLI stderr, may hold connection detail) and `.git` are not matched. | PASS |
-| `supabase/.temp` (link data) | `supabase link` writes the project ref, pooler URL (host and `postgres.<ref>` user, no password), service versions and linked-project metadata into `supabase/.temp/` (gitignored, `supabase/.gitignore:3`). It is a different path from `diff.sql`, so it is not in the artifact; upload-artifact v7 also excludes hidden files/dirs by default. Access token and DB password are passed by env only (`drift.yml:63-66`, `:71-73`), not written by this workflow. | PASS |
-| Content of `diff.sql` | stdout of `supabase db diff --remote --schema public` (`drift.yml:78`); CLI progress and errors go to `diff.err`. So it is schema SQL for `public` only. | PASS |
-| `if-no-files-found: error`, `retention-days: 1`, fixed name `drift-diff` | `drift.yml:99-102` | PASS |
+Upload `path: diff.sql` only, `retention-days: 1`, `if-no-files-found: error`, name `drift-diff`; `upload-artifact@cf430e03...` = v7.0.2 (previous gate checked the tag). Secrets only on the link and diff steps (step env); `persist-credentials: false`; `environment: production` (main only, by config). Only a write-access user can dispatch; no workflow grants `actions: write`.
 
-### Action pin
-
-`git ls-remote https://github.com/actions/upload-artifact`: `refs/tags/v7.0.2` = `cf430e030ddbb5b0abf93d22962f4752f3646cd9` (lightweight tag, same as `refs/tags/v7` and `main`), matching `drift.yml:97` `@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2`. PASS
-
-### Who can trigger it
-
-| Check | Proof | Result |
-|---|---|---|
-| `workflow_dispatch` needs write access | GitHub only lets users with write (or higher) on the repo dispatch a workflow (UI, `gh workflow run`, or REST). Read-only users and the public can't. | PASS |
-| A PR can't trigger it | `pull_request`/`pull_request_target` don't fire `drift.yml`. A token could dispatch only with `actions: write`; no workflow in the repo grants it (`ci.yml:9-10`, `gate.yml:10-11` `contents: read`; `drift.yml:16-18` `contents: read`, `issues: write`), and fork PR tokens are read-only. A PR that edits `drift.yml` changes nothing until merged (gate + `framework-change-approved`, which agents never add). | PASS |
-| Dispatch on a non-main ref | the job uses `environment: production` (`drift.yml:29`), restricted to `main` (decisions.md:10), so a dispatch from another branch (with an edited workflow) can't get the environment or its secrets. Not verified on GitHub (S19 carries). | PASS (by config) |
-
-### Secrets and residual exposure (accepted)
-
-- **No secrets in the artifact:** the artifact holds schema SQL only; no token, password or `.temp` link data (see above). The upload action gets the runner's `ACTIONS_RUNTIME_TOKEN`, not the Supabase secrets (step-level env only on link/diff).
-- **Residual exposure during the window (accepted by the person, decisions.md:12):** on a public repo, any signed-in GitHub user (and anyone with a token via the API) can download `drift-diff` from the run page until it is deleted or expires (retention 1 day; the "delete right after download" step is manual and not enforced). What leaks is the diff between production and `supabase/migrations` for `public`: table/column/index names, RLS policies (which reveal access logic and any gaps in it), function and trigger bodies, grants, defaults. If someone put a literal secret in production SQL (a function body, a column default, a `comment on`), it would be in the diff; nothing scans the artifact. If the drift is malicious (attacker-made object), the artifact shows the attacker that it was detected. The run's existence and the `drift-diff` artifact name are also public.
-- **S28 (new, Low, should-fix):** before uploading, the person (whoever dispatches) should know the above; the input description says the download is public (`drift.yml:11`). Optional hardening, not required: run the existing secret pattern scan (or gitleaks) on `diff.sql` before upload and skip the upload on a hit; or encrypt `diff.sql` with a key held only by the person. Owner: devops-cicd; the person decides.
-- **S29 (new, Low, doc):** if the CLI fails part-way, a partial `diff.sql` can still be uploaded on an opt-in run (the `always()` path). Still schema SQL only; no action needed beyond knowing it.
-
-## Automated results (local, HEAD `8a353f3`)
+## Automated results (local, HEAD `e643765`)
 
 | Check | Result |
 |---|---|
-| `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker) | `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script); secret pattern scan on changed files PASS (gitleaks not installed locally) |
+| `bash scripts/verify.sh --brief tasks/0/TASK_BRIEF.md` (local Supabase in Docker) | `verify.sh: PASS 18/18 (1 skipped)` (`test:e2e`, no script); basic secret pattern scan PASS (gitleaks not installed locally) |
 | `npm audit --audit-level=high` | `found 0 vulnerabilities` |
-| Workflow parse (js-yaml) | parses; see above |
-| Supabase security advisors | Not run: agents don't touch the cloud project; the PR adds no schema |
-| RLS check | verify.sh static check PASS, `supabase test db` PASS (no tables) |
+| Workflow parse (js-yaml) | parses (see above) |
+| Supabase security advisors | not run: agents don't touch the cloud project; the PR adds no schema |
+| RLS check | verify.sh static check PASS, `supabase test db` PASS |
 
 ## Findings
 
 ### FAIL-worthy
 
-None. The upload runs only on a write-access user's manual dispatch on `main` with `upload_diff=true`, uploads only schema SQL, and the remaining exposure is exactly what the person accepted.
+None.
 
-### Should-fix
+### Closed
 
-New: S28, S29 (above). Carried open from the previous gate (`specs/0/security-gate.md` at `origin/main`'s PR #2 pass, unchanged by this PR): S14 (check-name spoofing of `merge-gate`), S5, S15, S16, S19 (nothing verifies the `production` environment's main-only policy; this PR now also relies on it), S20/S21, S23, S24, S26, S27. Note for S15: `roles/devops-cicd.md` is a framework file, so this PR needs the person's `framework-change-approved` label.
+- **S28** (no secret scan before upload): closed by `e643765` (see above).
+- **S29** (partial diff upload): closed by `e643765` (see above).
+
+### Should-fix (new, Low)
+
+- **S30 (Low):** a gitleaks hit (exit 99) prints "possible secret in production schema, not uploaded" in a public run log and does nothing else: no issue (unless there is also drift) and no stop. It tells the public that production SQL probably holds a secret, and nobody is asked to act. The person who dispatched sees it; they should treat it as AGENT_RULES 15 / stop rule 2 (find it locally with the read-only `supabase db diff --remote`, rotate). Optional: make the message neutral ("secret scan failed") and open an issue that names no detail. Owner: devops-cicd; the person decides.
+- **S31 (Low, accepted residual):** gitleaks matches known key patterns and entropy; a secret that matches no rule (e.g. a plain password in a column default or function body) still passes and would be uploaded. The rest of the accepted exposure from the previous gate stays (schema names, RLS logic, function bodies are downloadable by any signed-in user until the artifact is deleted or expires; deletion is manual). Also `gitleaks detect` is the deprecated 8.x subcommand (same as `ci.yml:100`); if it ever stops working, the scan fails closed (no upload). Confirm on the first opt-in run.
+
+### Carried open (unchanged by this PR)
+
+S14 (check-name spoofing of `merge-gate`), S5, S15, S16, S19 (nothing verifies the `production` environment's main-only policy; this PR relies on it), S20/S21, S23, S24, S26, S27. Note for S15: `roles/devops-cicd.md` and `.github/workflows/drift.yml` are framework/pipeline files, so this PR needs the person's `framework-change-approved` label.
 
 ## Secret exposure
 
