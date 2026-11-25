@@ -52,10 +52,8 @@ Security's rule: any per-schema row other than `public` and `storage`, or a `sto
 
 Relayed to git-release by the orchestrator from the person's screenshots:
 
-| Query | Rows | Matches |
-|-------|------|---------|
-| 1 (global, `defaclnamespace = 0`) | `postgres | f | {postgres=X/postgres}` (exactly one row) | yes, expected value |
-| 2 (per-schema, `postgres`, functions) | `public | {postgres=X/postgres}`; `storage | {postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}` | yes: `public` as expected; `storage` matches local; no other schema |
+- **Query 1** (global, `defaclnamespace = 0`): exactly one row, `postgres | f | {postgres=X/postgres}`. Matches the expected value.
+- **Query 2** (per-schema, `postgres`, functions): `public | {postgres=X/postgres}` and `storage | {postgres=X/postgres,anon=X/postgres,authenticated=X/postgres,service_role=X/postgres}`; no other schema. `public` is as expected; `storage` matches local.
 
 Security's rule is met (no row other than `public` and `storage`, and `storage` matches local), so nothing goes to
 security.
@@ -65,7 +63,7 @@ security.
 - AC1-AC7: proven before merge (pgTAP `supabase/tests/02_function_privileges_test.sql` in CI `db-check`, security
   gate PASS, review APPROVE; see `tasks/2a/TASK_BRIEF.md`).
 - AC8: migration in production history **yes**; default drift run green **yes**; read-only `pg_default_acl`
-  check **PASS** (run by the person 2026-11-25 ~16:30 UTC, rows below).
+  check **PASS** (run by the person 2026-11-25 ~16:30 UTC, rows above).
 - No user-facing feature: the behavior (anon/authenticated can't call new functions without an explicit grant) is
   proven by the pgTAP test, not by a real-user action.
 
