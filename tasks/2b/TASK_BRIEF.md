@@ -106,6 +106,56 @@ specs/2b/**            # threat-model.md + security-gate.md (security), test-pla
   - With `enable_confirmations = true`, local signup tests need the confirmation email from the local mail server (`[local_smtp]`, enabled) or another way qa-test documents; no real email is sent.
   - The local and test values for the Supabase URL and anon key come from `npx supabase status`; no env var for them is listed in PROJECT_CONTEXT for tests, so don't invent one (propose it in the Handoff).
 
+### devops-cicd, 2026-11-25
+
+- **Changed:**
+  - `next.config.ts`: added the `isDev` / `supabaseOrigin()` / `contentSecurityPolicy` code from threat model A1 verbatim, and an `async headers()` returning one rule `source: "/(.*)"` with the six headers of A1/A2 (CSP, `X-Frame-Options`, `Referrer-Policy`, `X-Content-Type-Options`, `Permissions-Policy`, `Strict-Transport-Security`). `cacheComponents: true` and `partialPrefetching: true` unchanged. Note: the brief says "five headers"; security's spec has six (adds HSTS). I copied the spec (six).
+  - `supabase/config.toml`: exactly nine value lines changed, nothing else (comments, ports 55420-55429, other sections untouched; `[auth.sms] enable_confirmations` stays `false`): `[auth]` `minimum_password_length = 12`, `password_requirements = "letters_digits"`; `[auth.rate_limit]` `email_sent = 30`, `sign_in_sign_ups = 10`, `token_verifications = 5`; `[auth.email]` `enable_confirmations = true`, `secure_password_change = true`, `max_frequency = "60s"`, `otp_expiry = 900`. All "keep" values from section B already matched. `[auth.captcha]` and `[auth.email.smtp]` stay commented. No secret, no new env var.
+- **Verified:**
+  - `npm run typecheck`, `npm run lint`, `npm run build`: pass.
+  - Production server (`npm run build && npx next start -p 3100`): `/` (200), `/does-not-exist` (404) and `/next.svg` all carry the headers. Lines from `curl -sI` (build without `NEXT_PUBLIC_SUPABASE_URL`):
+    ```
+    Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+    X-Frame-Options: DENY
+    Referrer-Policy: strict-origin-when-cross-origin
+    X-Content-Type-Options: nosniff
+    Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+    Strict-Transport-Security: max-age=63072000; includeSubDomains
+    ```
+    With `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55421` set **at build time**, the CSP has `connect-src 'self' http://127.0.0.1:55421`. **Important:** the header values are fixed at `next build`; setting the env var only at `next start` does not change them (observed). So production builds must have `NEXT_PUBLIC_SUPABASE_URL` set at build time, or Supabase calls are blocked by `connect-src` (fails closed, as specified).
+  - Local stack: `npx --no-install supabase stop` + `start` (under the shared lock); the auth container came up healthy and its environment shows the new values (`GOTRUE_PASSWORD_MIN_LENGTH=12`, `GOTRUE_MAILER_AUTOCONFIRM=false`, `GOTRUE_MAILER_OTP_EXP=900`, `GOTRUE_SMTP_MAX_FREQUENCY=1m0s`, `GOTRUE_RATE_LIMIT_VERIFY=5`, `GOTRUE_RATE_LIMIT_OTP=10` (the CLI's mapping of `sign_in_sign_ups`), `GOTRUE_SECURITY_UPDATE_PASSWORD_REQUIRE_REAUTHENTICATION=true`).
+  - Threat model Question 1 (`email_sent` locally): observed `GOTRUE_RATE_LIMIT_EMAIL_SENT=360000` in the local auth container, i.e. the CLI does **not** apply `email_sent = 30` without `[auth.email.smtp]` enabled. Don't assert email-send limiting behavior locally.
+  - `bash scripts/verify.sh --brief tasks/2b/TASK_BRIEF.md` (with DB): `verify.sh: PASS 18/18 (1 skipped)` (skipped: test:e2e, no script). `supabase db reset` / migrations apply / `supabase test db` pass with the new config.
+  - Not done by me: the browser-console CSP check on `/` (H8/AC4), the live L1 check, AC6/AC7 live checks: qa-test.
+- **Production dashboard checklist (AC10). The person applies this in the Supabase dashboard; agents never do (AGENT_RULES §4). No secrets here: credentials and the CAPTCHA secret are typed into the dashboard only.** Locations below are described from the Supabase dashboard's Authentication section as I know it; they were not checked against the live dashboard by an agent, so if a name differs, look in the Authentication settings for the setting with that meaning. If the dashboard shows a rate in a different unit, convert so the rate is the same (e.g. 10 per 5 min = 120 per hour).
+  1. [ ] **Custom SMTP** (sends auth emails from your own provider; required before real users, the built-in mailer is for testing only). Value: enabled, your chosen provider, sender address on your own domain. Where: Authentication, email / SMTP settings. Do this first: the email rate limit can only be set after it.
+  2. [ ] **Rate limit, emails sent**: 30 per hour. Where: Authentication, Rate Limits. (Matches config.toml `email_sent = 30`.)
+  3. [ ] **Rate limit, SMS sent**: 30 per hour (inert, phone provider off). Where: Authentication, Rate Limits.
+  4. [ ] **Rate limit, anonymous sign-ins**: 30 per hour per IP (inert, anonymous sign-ins off). Where: Authentication, Rate Limits.
+  5. [ ] **Rate limit, token refreshes**: 150 per 5 min per IP. Where: Authentication, Rate Limits.
+  6. [ ] **Rate limit, sign-ups and sign-ins**: 10 per 5 min per IP (password guessing / signup spam). Where: Authentication, Rate Limits.
+  7. [ ] **Rate limit, token verifications (OTP / magic link)**: 5 per 5 min per IP (row 9: the 6th code guess is refused). Where: Authentication, Rate Limits.
+  8. [ ] **Rate limit, Web3 sign-ins**: 30 per 5 min per IP (inert). Where: Authentication, Rate Limits.
+  9. [ ] **CAPTCHA**: enabled, provider Cloudflare Turnstile, secret entered in the dashboard only. Where: Authentication, attack protection / bot protection settings. **Turn on only together with task 3's login form that sends the Turnstile token**; earlier, every signup and sign-in fails. Off locally and in CI (config.toml `[auth.captcha]` stays commented).
+  10. [ ] **Minimum password length**: 12. Where: Authentication, email provider / password settings.
+  11. [ ] **Password requirements**: letters and digits. Where: same place as the minimum length.
+  12. [ ] **Leaked-password protection**: on, if your plan offers it (dashboard-only, no config.toml key). Where: Authentication, password / attack protection settings.
+  13. [ ] **Confirm email**: on. Where: Authentication, email provider settings.
+  14. [ ] **Secure password change**: on (a stolen session can't change the password without a recent login). Where: Authentication, email provider settings.
+  15. [ ] **Email OTP expiration**: 900 seconds (15 minutes). Where: Authentication, email provider settings.
+  16. [ ] **Email OTP length**: 6. Where: Authentication, email provider settings.
+  17. [ ] **Minimum interval between emails per user**: 60 seconds (stops email bombing). Where: Auth settings (email / SMTP area; exact page not verified).
+  18. [ ] **Anonymous sign-ins**: off. Where: Authentication, sign-in / user signup settings.
+  19. [ ] **Manual linking**: off. Where: Authentication, sign-in / user signup settings.
+  20. [ ] **Phone provider**: off. Where: Authentication, providers.
+  21. [ ] **Site URL and redirect URLs**: exact production URL(s) only, no wildcards (prevents open redirects carrying auth tokens). Where: Authentication, URL configuration. Set once the production URL is decided (PROJECT_CONTEXT: not decided yet).
+  - Also for production builds: `NEXT_PUBLIC_SUPABASE_URL` must be set in the hosting provider's **build** environment (see Verified), otherwise the CSP blocks Supabase calls.
+- **Left to do / next role must know (qa-test):**
+  - Header test (H1-H7, static, import `next.config.ts` and call `headers()`): one rule `source: "/(.*)"` with exactly these six keys and values: `Content-Security-Policy` (A1 string; with `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55421` and `NODE_ENV` not `development`: `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self' http://127.0.0.1:55421; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'`), `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Content-Type-Options: nosniff`, `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, `Strict-Transport-Security: max-age=63072000; includeSubDomains`. The CSP is computed at module load, so stub env and re-import the module (`vi.resetModules()`) for H4-H6.
+  - Config test (S1-S12) keys and expected values: `[auth]` `minimum_password_length = 12`, `password_requirements = "letters_digits"`, `enable_anonymous_sign_ins = false`; `[auth.rate_limit]` `email_sent = 30`, `sms_sent = 30`, `anonymous_users = 30`, `token_refresh = 150`, `sign_in_sign_ups = 10`, `token_verifications = 5`, `web3 = 30`; `[auth.email]` `enable_confirmations = true`, `double_confirm_changes = true`, `secure_password_change = true`, `max_frequency = "60s"`, `otp_length = 6`, `otp_expiry = 900`; `[auth.sms]` `enabled = false` (note `[auth.sms]` also has `enable_confirmations = false`: parse by section); no active `[auth.captcha]`.
+  - The one manual live check, **L1 (OTP brute force)**: with the local stack running, send 10 `POST <API URL>/auth/v1/verify` (header `apikey: <anon key>` from `npx supabase status`, never written down) with body `{"type":"email","email":"<test address>","token":"<wrong 6 digits>"}`; expect `429` at or before attempt 6 and on every later attempt, never a session. Record each status code. Under the shared lock if you start/stop the stack. Rate limits are per 5 min per IP on the shared stack: L1 plus AC6/AC7 checks can trip `sign_in_sign_ups = 10` / `token_verifications = 5`; wait out the window, never raise the limits.
+  - H8/AC4: browser console on `/` with a production build, no CSP violation (not checked by me).
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
