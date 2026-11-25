@@ -102,7 +102,7 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
   roles/devops-cicd.md specifies. Suggested framework fix: say in roles/devops-cicd.md that ci.yml must not
   run verify.sh on push.
 
-## L10. One required review vs. a single-account owner (open, the person decides)
+## L10. One required review vs. a single-account owner (fixed)
 
 - `main` requires 1 approving review, and GitHub doesn't let a PR's author approve it. Everything here is
   pushed from the owner's only account (`masterege96`), so no PR can merge without a second reviewer
@@ -124,3 +124,8 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
   script exists yet. bootstrap-check.sh checks that the npm scripts typecheck, lint, test, build exist.
 - **L8:** verify.sh runs `gitleaks detect --no-banner --redact --log-level error`; exit 0 PASS, exit 1
   "found secrets" with the output tail, any other exit "could not run (exit N)".
+- **L10:** the person chose 0 required approvals plus a required `gate` check. `scripts/gate-check.sh`
+  passes only when `specs/<id>/security-gate.md` says `Result: PASS` and `specs/<id>/review.md` says
+  `Result: APPROVE`, both committed after the last code change. ci.yml has a `gate` job; branch protection
+  requires `verify`, `db-check`, `secrets`, `gate`. ORCHESTRATOR.md "Merge approval", roles/security.md,
+  roles/code-reviewer.md, roles/git-release.md and roles/devops-cicd.md updated. Recorded in tasks/decisions.md.

@@ -20,7 +20,7 @@ Plus PR review comments on GitHub.
 - `verify.sh` output from CI.
 
 ## Outputs
-`specs/<id>/review.md`: `APPROVE` or `CHANGES_REQUESTED`, then a list of findings. Each finding has: file:line, severity (`blocker` / `should-fix` / `nit`), what is wrong, and the owning role.
+`specs/<id>/review.md`: the first line is exactly `Result: APPROVE` or `Result: CHANGES_REQUESTED` (the `gate` CI check reads it), then a list of findings. Each finding has: file:line, severity (`blocker` / `should-fix` / `nit`), what is wrong, and the owning role.
 
 ## Checklist
 1. **Does it do what the brief says?** Every acceptance criterion maps to code and a passing test. Nothing extra outside the brief.

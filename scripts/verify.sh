@@ -77,6 +77,9 @@ if [ -n "$BRIEF" ]; then
       OUT=""
       for f in $CHANGED; do
         case "$f" in tasks/*) continue ;; esac   # task briefs and handoff notes are always allowed
+        # this task's gate reports (written by security, code-reviewer, git-release) are always allowed
+        TID=$(printf '%s' "$BRIEF" | sed -nE 's#^tasks/([^/]+)/TASK_BRIEF\.md$#\1#p')
+        case "$f" in "specs/$TID/security-gate.md"|"specs/$TID/review.md"|"specs/$TID/post-deploy.md") [ -n "$TID" ] && continue ;; esac
         match=0
         while IFS= read -r g; do
           case "$g" in
