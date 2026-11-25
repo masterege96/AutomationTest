@@ -1,11 +1,10 @@
 name: ci
 
 # Required checks on main: verify, db-check, secrets (job names must not change).
+# Pull requests only: verify.sh needs a task branch (<type>/<id>-<name>) for its scope check.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-  push:
-    branches: [main]
 
 permissions:
   contents: read

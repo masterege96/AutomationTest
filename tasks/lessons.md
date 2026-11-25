@@ -77,3 +77,36 @@ Every entry ends with a fix to a role contract, a rulebook or a script. A lesson
   back to the pattern scan locally, CI installs gitleaks 8.30.1).
 - Supabase CLI 3.4.0 is out; 3.2.0 is pinned (matches the framework docs). Upgrade only deliberately.
 - create-next-app 16.4.6 still scaffolds ESLint 9 (npm marks 9.39.5 deprecated). Kept; upgrading is a separate, deliberate change.
+
+## L8. verify.sh: gitleaks step always FAILs in CI, because `-q` isn't a gitleaks flag (open, blocks a green `verify`)
+
+- **Seen:** first CI run on `main`, run 45598529613, job `verify`, gitleaks 8.30.1.
+- **Exact output:**
+  ```
+  FAIL  gitleaks found secrets
+        Run: gitleaks detect --redact  (then STOP and tell the person)
+  ```
+- **Not a real leak:** the `secrets` job in the same run scanned the same 2 commits and logged
+  `no leaks found`. verify.sh runs `gitleaks detect --no-banner --redact -q`; gitleaks 8.30.1 has no
+  `-q`/`--quiet` flag (checked `cmd/root.go` and `cmd/detect.go` at tag v8.30.1), so the command exits 1 with
+  an unknown-flag error, and verify.sh sends that output to /dev/null and reports it as found secrets.
+- **Suggested fix (scripts/verify.sh, owner: the person):** `gitleaks detect --no-banner --redact --log-level error`,
+  and tell "leaks found" apart from "gitleaks failed to run" (exit code 1 is leaks only with `--exit-code`;
+  show the output tail on failure). Until it lands, the `verify` required check can't pass.
+
+## L9. CI on push to `main` fails verify.sh's scope check (closed)
+
+- **Seen:** same run: `FAIL  scope check (no --brief given) (skipped, but required in CI)`. On a push to
+  `main` there is no `<type>/<id>-<name>` branch, so there's no brief.
+- **Fix (done, devops-cicd scope, branch `ci/0-phase0-fixes`):** ci.yml runs on `pull_request` only, as
+  roles/devops-cicd.md specifies. Suggested framework fix: say in roles/devops-cicd.md that ci.yml must not
+  run verify.sh on push.
+
+## L10. One required review vs. a single-account owner (open, the person decides)
+
+- `main` requires 1 approving review, and GitHub doesn't let a PR's author approve it. Everything here is
+  pushed from the owner's only account (`masterege96`), so no PR can merge without a second reviewer
+  account, or an admin bypass (`enforce_admins` is off; git-release must never use it).
+- **Options for the person:** add a second GitHub account/collaborator as reviewer; or set required
+  reviews to 0 and rely on required checks plus the code-reviewer role's `review.md`; record the choice in
+  `tasks/decisions.md` and in roles/git-release.md.

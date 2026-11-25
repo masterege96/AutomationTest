@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_PROGRESS |
+| State | BLOCKED |
 | Owner role | git-release, devops-cicd |
 | Branch | `main` (Phase 0 exception: the repo was empty, so the initial commit goes to `main` directly, before branch protection) |
 | Worktree | none (repo root `C:\Users\tubae\Claude\AutomationTest`) |
@@ -81,7 +81,14 @@ supabase/tests/*
 
 ## Handoff (each role appends; never delete earlier entries)
 
+### git-release + devops-cicd, 2026-11-25
+
+- **Changed:** first commit `.gitattributes` + `.gitignore`; then Next.js 16.4.6 scaffold, `supabase init` (local ports 55420-55429), framework copy, `PROJECT_CONTEXT.md`, pins (`.nvmrc` 24.11.0, engines, `packageManager` npm@11.6.1, `supabase` 3.2.0, exact deps, `.npmrc`, lockfile), npm scripts, PR template, `CHANGELOG.md` 0.1.0, `ci.yml`, `drift.yml`, `scripts/ci/install-gitleaks.sh`, migration `20261125104017_init.sql`, `supabase/tests/00_bootstrap_test.sql`, `tasks/*`. GitHub: `main` protected (PR, 1 review, checks verify/db-check/secrets, strict, linear history, no force-push, no deletion); labels destructive-approved, security, db, blocked, drift.
+- **Verified:** local `verify.sh: FAIL 1/17 failed: CR line endings in migrations (1 skipped)` (false FAIL, lessons L1); `bootstrap-check: FAIL 1 of 30 checks failed (0 skipped)` (only: DB deploy path connected). CI run 45598529613 on main: secrets PASS, db-check PASS, verify FAIL (scope on push, fixed L9; gitleaks `-q`, L8).
+- **Left to do:** the person: connect the deploy path (Supabase project + GitHub integration), add drift secrets, run drift once, fix L1/L2/L3/L8 in verify.sh, decide L10 (review vs. single account). Then a throwaway PR proving a red run (planted CR).
+- **Next role must know:** use `npx supabase` (pinned CLI). `--passWithNoTests` must go when the first unit test lands (L5). Branch `ci/0-phase0-fixes` holds the CI-trigger fix and this handoff; it needs a PR.
+
 ## Blocked (fill in only when BLOCKED)
 
-- **Missing:**
-- **Who must provide it:**
+- **Missing:** deploy path (Supabase cloud project + GitHub integration), drift secrets `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID`; verify.sh fixes L1, L8; reviewer decision L10
+- **Who must provide it:** the person
