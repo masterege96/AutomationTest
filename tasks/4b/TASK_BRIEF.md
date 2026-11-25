@@ -402,3 +402,12 @@ commit -> PASS with label T2.
   (gate file `Result:` line) works on a single line (`grep -m1`), so it isn't affected.
 - **Verified:** `npx vitest run tests/integration/gate-check.test.ts`: 78 passed (78). `npm test`: 13 files,
   289 passed (289).
+
+### qa-test, 2026-11-25 (after 4a merge)
+
+- `7c46535`: gate-check fixtures no longer use `tasks/board.md` (main fixture and AC7 conflict: `tasks/0/TASK_BRIEF.md`;
+  AC12: `tasks/9x/notes.md`), assertions unchanged. `e72c328`: `tests/integration/task-scripts.test.ts` AC13 also excludes
+  `scripts/gate-check.sh` and `tests/integration/gate-check.test.ts` (orchestrator decision, Option 1: gate-check guards the
+  frozen `tasks/decisions.md` as a decision file, not an instruction to write to it); rest of AC13 unchanged.
+  `npx vitest run tests/integration/task-scripts.test.ts tests/integration/gate-check.test.ts`: 117 passed (117),
+  incl. the two AC20 multi-line label-time tests after devops-cicd's fix `717a9aa` (qa-test bug closed).
