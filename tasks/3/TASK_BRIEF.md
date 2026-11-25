@@ -328,6 +328,18 @@ Branch `db/3-todos-schema` (worktree `wt-3-db-builder`, from `feat/3-todos`). No
 - **Spec notes (no deviation made):** section 9's `btrim` set is written with literal Unicode characters (U+00A0 ... U+FEFF, invisible in most editors; only U+000B is a `\u` escape), while the note under it speaks of `E'...\uXXXX...'`. Copied as-is: same 19+6 characters, same meaning, applies and passes C1/C2. If reviewers prefer visible `\uXXXX` escapes, that is a db-architect change before merge (never after).
 - **Left to do:** backend-dev (API, uses these types), qa-test (integration/abuse tests on this schema). Production unchanged; it gets this migration only via merge to `main` (schema.md section 10 has the post-deploy read-only queries).
 
+### devops-cicd, 2026-11-25 (email templates)
+
+Branch `ci/3-todos-tooling` (worktree `wt-3-devops-cicd`, fast-forwarded to `feat/3-todos` first). Not pushed, not merged.
+- **Problem (from frontend-dev):** local Mailpit got the default "Confirm your email address" link email with no 6-digit code, so code sign-in and e2e couldn't work.
+- **Changed:**
+  - `supabase/templates/magic_link.html`, `supabase/templates/confirmation.html` (new): minimal HTML that shows `{{ .Token }}` large; no link, no images, no tracking. Same text in both (a new address gets the confirmation email, a known one the magic-link email).
+  - `supabase/config.toml`: only two new tables after the commented invite example, `[auth.email.template.magic_link]` and `[auth.email.template.confirmation]`, each with `subject = "Your sign-in code"` and `content_path = "./supabase/templates/<name>.html"`. Nothing else changed.
+  - Key names checked against the pinned CLI 3.2.0 binary (`node_modules/@supabase/cli-windows-x64/bin/supabase.exe`, its config schema): template names `invite, confirmation, recovery, magic_link, email_change, reauthentication`; fields of `auth.email.template.*`: `subject`, `content_path`, `content`. Path style follows the commented example in config.toml.
+- **Must do to apply (not done; the shared stack is in use):** restart the local stack: `npx supabase stop && npx supabase start`. Templates are read only at start. After that, sign-in emails in Mailpit show the 6-digit code.
+- **Production equivalent (the person, at SMTP setup, AC46/Q4b; agents never touch production):** dashboard Authentication > Email Templates: edit **Magic Link** and **Confirm signup** so the body shows `{{ .Token }}` (the code); copying the two files' HTML is enough. No secret involved.
+- **Verified:** `npx vitest run tests/integration/auth-config.test.ts`: 21/21 pass (S5/S8/S9 values unchanged). `bash scripts/verify.sh --no-db`: `verify.sh: FAIL 2/16 failed: npm run test, npm run test:e2e (1 skipped)`. Both failures are expected and owned by qa-test: `npm run test` = the 14 `tests/integration/security-headers.test.ts` cases (H1-H6, AC1) still on the old next.config CSP (move to N3/`buildCsp`); `npm run test:e2e` = no `playwright.config.ts` / `tests/e2e` yet (Playwright picks up the Vitest files and reports "No tests found"). Everything else PASS, including the scope check and build. Templates not yet checked in Mailpit (needs the restart).
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
