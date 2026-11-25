@@ -3,17 +3,29 @@ Result: APPROVE
 # Task 2b code review: security headers + local/CI auth defaults
 
 Reviewer: code-reviewer, 2026-11-25, fresh context, judged from the repo only. Branch `sec/2b-headers-auth-defaults`,
-diff `git diff origin/main...HEAD` (origin/main fetched first; merge base now `69c6151` = origin/main). Round 2:
-re-review after the orchestrator merged origin/main into the branch (merge commit `fc61959`: PR #8 docs, PR #9
-verify.sh reorder), changed AC2/AC3 to "six headers", added dashboard checklist item 22 (security's P1) in an
-orchestrator note, renumbered this branch's lesson L17 -> L21 and added L22. Security re-gated in `09c8f19` (PASS).
-Round 1 was `7e510e5` (APPROVE).
-Inputs read: round-1 review, `tasks/2b/TASK_BRIEF.md`, `specs/2b/security-gate.md`, `specs/2b/test-plan.md`,
-`specs/2b/threat-model.md`, `tasks/board.md`, `tasks/lessons.md`, merge commit `fc61959`.
+diff `git diff origin/main...HEAD` (origin/main fetched first; merge base now `9f742a9` = origin/main). Round 3:
+re-review after the orchestrator merged origin/main again (merge commit `329abd7`: PR #10 = task 2a's migration
+`20261125150215_function_privileges.sql`, pgTAP test `02_function_privileges_test.sql`, `specs/2a/**`, tasks docs)
+and added lesson L23. Security re-gated in `ec15a21` (PASS). Round 2 was `a2db9fd` (APPROVE), round 1 `7e510e5`.
+Inputs read: round-2 review, `tasks/board.md`, `tasks/lessons.md`, merge commit `329abd7`, `git diff a2db9fd HEAD`.
 
-No blockers. Round-1 should-fix items 1-3 and nit 8 are resolved; nits 4-7 remain (optional, carry to later tasks).
+No blockers. Round-1 should-fix items 1-3 and nit 8 are resolved; nits 4-7 and the item-22 placement nit remain
+(optional, carry to later tasks).
 
-## Round-2 checks
+## Round-3 checks
+
+| Check | Result |
+|-------|--------|
+| `git diff a2db9fd HEAD -- next.config.ts supabase/config.toml tests/` | empty: code and tests unchanged since rounds 1-2, so the code review stands |
+| `git diff a2db9fd HEAD` (everything) | only main's PR #10 content (`specs/2a/**`, the 2a migration and pgTAP test, `tasks/2a/**`, board/decisions/lessons) plus `specs/2b/security-gate.md` (security's re-gate) |
+| PR net diff `git diff origin/main...HEAD` files | only `next.config.ts`, `supabase/config.toml`, `tests/integration/{auth-config,security-headers}.test.ts`, `specs/2b/**`, `tasks/2b/TASK_BRIEF.md`, `tasks/board.md`, `tasks/lessons.md` |
+| Conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) anywhere at HEAD | none |
+| `tasks/board.md` | main's rows (0, 1, 2c, 2a) unchanged, plus one 2b row (`IN_REVIEW`); net diff is +1 line |
+| `tasks/lessons.md` | L1-L20 identical to origin/main (diff is append-only after main's last line); then L21, L22, L23, each unique |
+| `npm test` | 2 files, 44/44 pass |
+| `bash scripts/verify.sh --brief tasks/2b/TASK_BRIEF.md` (under the shared-stack lock; now also applies and tests 2a's migration) | `verify.sh: PASS 18/18 (1 skipped)` (skipped: `test:e2e`, no script) |
+
+## Round-2 checks (history)
 
 | Check | Result |
 |-------|--------|
@@ -21,7 +33,7 @@ No blockers. Round-1 should-fix items 1-3 and nit 8 are resolved; nits 4-7 remai
 | PR net diff `git diff origin/main...HEAD` files | only `next.config.ts`, `supabase/config.toml`, `tests/integration/{auth-config,security-headers}.test.ts`, `specs/2b/**`, `tasks/2b/TASK_BRIEF.md`, `tasks/board.md`, `tasks/lessons.md` |
 | Conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) in tasks/, specs/, scripts/, tests/, supabase/, next.config.ts | none |
 | `tasks/board.md` | main's rows (0, 1, 2c) unchanged, plus one 2b row (`IN_REVIEW`); net diff is +1 line |
-| `tasks/lessons.md` | L1-L19 identical to origin/main (diff is append-only after main's last line); then L21, L22. L20 left free for the 2a branch |
+| `tasks/lessons.md` (round 2) | L1-L19 identical to origin/main (diff is append-only after main's last line); then L21, L22. L20 left free for the 2a branch |
 | Lesson references | brief Handoff and security gate now say L21; no stale reference to this branch's lesson as L17 (other than this review's round-1 history) |
 | `npm test` | 2 files, 44/44 pass |
 | `bash scripts/verify.sh --brief tasks/2b/TASK_BRIEF.md` (under the shared-stack lock, main's reordered verify.sh) | `verify.sh: PASS 18/18 (1 skipped)` (skipped: `test:e2e`, no script) |
@@ -41,7 +53,7 @@ No blockers. Round-1 should-fix items 1-3 and nit 8 are resolved; nits 4-7 remai
 | AC9 | no secret, no new env var | `S12`, verify.sh migrations apply / `supabase test db` | yes |
 | AC10 | checklist in `tasks/2b/TASK_BRIEF.md:130-151` (items 1-21) + item 22 in the orchestrator note | matches threat model C, values equal config.toml, no secrets (item 22 keeps the key in a shell variable only) | yes |
 | AC11 | `specs/2b/test-plan.md` | maps AC1-AC12 and rows 9, 11, 3, 13 to file + test name + level | yes |
-| AC12 | - | verify.sh PASS (round 2), security gate PASS (`09c8f19`), this review APPROVE; branch now contains origin/main, so it merges cleanly; CI not yet observed | pending CI |
+| AC12 | - | verify.sh PASS (round 3), security gate PASS (`ec15a21`), this review APPROVE; branch contains current origin/main (`9f742a9`), so it merges cleanly; CI not yet observed | pending CI |
 
 ## Code quality notes (unchanged from round 1; code not changed)
 
@@ -57,8 +69,8 @@ No blockers. Round-1 should-fix items 1-3 and nit 8 are resolved; nits 4-7 remai
 
 1. **Merge conflicts / lesson number - RESOLVED.** origin/main merged in `fc61959`; no conflict markers; the board
    keeps main's rows plus 2b; this branch's lesson is now L21 (L1-L19 identical to main, L20 reserved for 2a), plus
-   L22. verify.sh re-run on main's reordered script: PASS. Note for git-release: if 2a renumbers its lesson away
-   from L20 before merging, re-check numbering at that merge.
+   L22. Round 3: 2a merged keeping L20, so the numbering holds (L1-L20 = main, then L21-L23); second merge
+   `329abd7` is clean, verify.sh PASS with 2a's migration applied.
 
 2. **Five vs six headers - RESOLVED.** `tasks/2b/TASK_BRIEF.md` AC2/AC3 now say "six headers". Remaining "five"
    mentions are historical Handoff notes (`TASK_BRIEF.md:112,176`, `specs/2b/test-plan.md:19`) that explain the
@@ -88,7 +100,8 @@ No blockers. Round-1 should-fix items 1-3 and nit 8 are resolved; nits 4-7 remai
 
 8. **Board / brief state - RESOLVED.** Brief state and board row are `IN_REVIEW`. The brief now states that the
    person's task 2 answers live in `tasks/decisions.md` on the 2a branch and that this brief quotes them; if 2b
-   merges before 2a, the quote in the brief is the record until 2a lands.
+   merges before 2a, the quote in the brief is the record until 2a lands. Round 3: 2a has landed;
+   `tasks/decisions.md` is now on main and on this branch.
 
 ## Gate check
 
