@@ -147,3 +147,11 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
     that no repo-level `SUPABASE_*` secrets exist.
   - S20/S21 (the person): roles/git-release.md "Owns ... branch protection, labels, merge settings"
     contradicts AGENT_RULES 18a.
+- **Added from security passes 2 and 3 (open):**
+  - S14 second variant: open a PR against a branch whose own `gate.yml` always passes
+    (`pull_request_target` runs the base branch's workflow), then retarget to `main` and re-run the old green
+    run. A full fix needs a check source workflows can't imitate (GitHub App / org-level required workflow).
+    With the Supabase integration on, a spoofed merge is a path to a production write: decide before the first real table.
+  - S26: an odd diff count in drift.yml is reported as `drift=yes` (opens a drift issue, stop rule 1) when
+    the check itself broke. Fix: non-numeric → exit 1 without `drift=yes`.
+  - S27: drift.yml comment about adding a post-deploy trigger "once the deploy path exists" is now due.
