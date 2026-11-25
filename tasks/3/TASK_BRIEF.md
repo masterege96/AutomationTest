@@ -205,6 +205,8 @@ specs/3/**
 
 ## Questions for the person
 
+**Answered 2026-11-25 (the person, via the coordinator; recorded in `tasks/decisions.md`): all recommended defaults below, and S14 stays accepted for this merge.** Q2 is still open: backend-dev proposes, the person picks.
+
 Each has a recommended default. The task stays in `BACKLOG` until they're answered (the orchestrator records the answers in `tasks/decisions.md` and here).
 
 1. **New dependencies (AGENT_RULES §8; versions are picked by the role that adds them, pinned exactly).** The slice needs:
