@@ -221,3 +221,16 @@ Applied in this repo and in the master framework copy (`C:\Users\tubae\Claude\ag
 - **To check in step 4 (devops-cicd):** whether the `labeled` event run was created and cancelled by the
   `concurrency: ci-${{ github.ref }}` group, or never created (e.g. Actions delay). Then document the
   expected way to re-evaluate a PR after a label change.
+
+## L17. The local stack doesn't enforce the per-IP auth rate limits (open, security decides)
+
+- **Seen:** task 2b, manual check L1: with `token_verifications = 5` in `config.toml` (auth container env
+  `GOTRUE_RATE_LIMIT_VERIFY=5`), 10 wrong-OTP `POST /auth/v1/verify` requests all returned `403 otp_expired`,
+  no `429`, for a non-existent and for an existing unconfirmed user. The threat model expected a 429 by attempt 6.
+- **Likely cause (not verified in the GoTrue source):** GoTrue applies its per-IP limits only when a rate-limit
+  header (`GOTRUE_RATE_LIMIT_HEADER`) is configured; the local CLI stack sets none, the hosted platform does.
+- **Effect on the framework:** a live rate-limit abuse test on the local/CI stack can't prove row 9; it passes or
+  fails for reasons unrelated to the config. Today only the static config test (S5) and the production checklist cover it.
+- **Fix to the framework (suggested):** security's threat-model template says per-IP auth limits are proven by the
+  static config test locally plus a read-only post-deploy check on production (person-run), not by a local live test;
+  or devops-cicd finds a supported CLI setting that enables the header locally (needs the person's OK).
