@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import SignInForm from "@/components/SignInForm";
-import { createClient } from "@/lib/server/supabase";
+import { createClient, getVerifiedUser } from "@/lib/server/supabase";
 import styles from "../page.module.css";
 
 export const metadata: Metadata = {
@@ -12,9 +12,7 @@ export const metadata: Metadata = {
 // No return-path parameter: after sign-in the user always lands on "/" (threat model 3.1).
 export default async function SignInPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getVerifiedUser(supabase);
   if (user) redirect("/");
 
   return (
