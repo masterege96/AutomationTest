@@ -2,7 +2,8 @@
 
 - **Date:** 2026-11-25 (19:11 UTC)
 - **Task:** 4 (`tasks/4/PLAN.md`)
-- **Who:** the person (decision card "Yes, all five", relayed by the coordinator)
+- **Who:** the person, in their own words: "Yes, all five"
+- **Source:** the decision card in the project thread, relayed by the coordinator
 
 ## Decision
 
