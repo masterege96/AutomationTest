@@ -2,17 +2,18 @@ Result: PASS
 
 # Task 2b security gate: security headers + local/CI auth defaults
 
-Author: security (Gate), 2026-11-25. Fresh context, judged from the repo only. Branch `sec/2b-headers-auth-defaults`,
+Author: security (Gate), 2026-11-25; re-gated after the main merge (HEAD `fc61959`), see the last section. Fresh
+context, judged from the repo only. Branch `sec/2b-headers-auth-defaults`,
 diff `git diff origin/main...HEAD` (origin/main fetched first). No Supabase cloud or production access was used.
 
 PASS carries **one required post-deploy item (P1, below)** that the person must do before any real user signs in.
-Row 9 rests on it.
+Row 9 rests on it. P1 is now dashboard checklist item 22 in `tasks/2b/TASK_BRIEF.md` (orchestrator note).
 
 ## Summary
 
 | Row | Control (file:line) | Abuse test (test name) | Result |
 |-----|---------------------|------------------------|--------|
-| 9 Guess the login code | `supabase/config.toml:214` `token_verifications = 5`; `:212` `sign_in_sign_ups = 10`; `:243` `otp_expiry = 900`; `:241` `otp_length = 6`; `:239` `max_frequency = "60s"`; `:187` `minimum_password_length = 12`; `:190` `password_requirements = "letters_digits"`; `:232` `enable_confirmations = true`; `:234` `secure_password_change = true`; `:204-216` all seven rate limits; `:219` `[auth.captcha]` stays commented; production: dashboard checklist in `tasks/2b/TASK_BRIEF.md` (devops-cicd Handoff, items 1-21) | `tests/integration/auth-config.test.ts`: `S1` ... `S11` (S5: `[auth.rate_limit] token_verifications is 5 (< 10: ...)`); manual live checks AC6, AC7, L1 | **PASS with accepted local limitation** (static S1-S11 pass; AC6 and AC7 pass live; L1 can't be enforced by the local stack, see the L1 decision; P1 required post-deploy) |
+| 9 Guess the login code | `supabase/config.toml:214` `token_verifications = 5`; `:212` `sign_in_sign_ups = 10`; `:243` `otp_expiry = 900`; `:241` `otp_length = 6`; `:239` `max_frequency = "60s"`; `:187` `minimum_password_length = 12`; `:190` `password_requirements = "letters_digits"`; `:232` `enable_confirmations = true`; `:234` `secure_password_change = true`; `:204-216` all seven rate limits; `:219` `[auth.captcha]` stays commented; production: dashboard checklist in `tasks/2b/TASK_BRIEF.md` (devops-cicd Handoff, items 1-21, plus item 22 = P1 in the orchestrator note) | `tests/integration/auth-config.test.ts`: `S1` ... `S11` (S5: `[auth.rate_limit] token_verifications is 5 (< 10: ...)`); manual live checks AC6, AC7, L1 | **PASS with accepted local limitation** (static S1-S11 pass; AC6 and AC7 pass live; L1 can't be enforced by the local stack, see the L1 decision; P1 required post-deploy) |
 | 11 XSS / clickjacking (header part) | `next.config.ts:4` (`isDev`), `:7-16` (`supabaseOrigin()`), `:18-30` (CSP builder), `:36-56` (`headers()`, one rule `source: "/(.*)"`, six headers at `:41-52`) | `tests/integration/security-headers.test.ts`: `H1: exactly one rule covers all paths and it carries exactly the six headers`, `H1/AC2: the all-paths rule source matches %s`, `H2: Content-Security-Policy (production, local API URL) equals the threat model string exactly`, `H2: %s equals %j exactly`, `H3: production CSP has no 'unsafe-eval', ...`, `H4: with NODE_ENV=development only script-src changes, ...`, `H4: 'unsafe-eval' is absent when NODE_ENV=%s`, `H5` (unset, empty), `H6` (origin only; fail closed for `javascript:`, `ftp:`, `data:`, non-URL); H7 red run and H8 live/browser check in the qa-test Handoff | **PASS** |
 | 3 Key in the browser (watch) | `next.config.ts:8` reads only `NEXT_PUBLIC_SUPABASE_URL` (public); `:12` reduces it to `u.origin` for http/https only | `H6: a URL with a path, query and an injected directive yields the origin only`; `H6: NEXT_PUBLIC_SUPABASE_URL=%j fails closed to connect-src 'self'`; verify.sh `client bundle has no server secrets` | **PASS** |
 | 13 `.env` in Git (watch) | `supabase/config.toml`: no literal secret; every secret-like key is `""` or `env(NAME)`; diff adds no secret and no env var | `S12: every secret-like key (secret, pass, auth_token, *_key, ...) is "" or "env(NAME)"`; `S12: no JWT or Supabase API key appears anywhere in the file`; `finds the secret-like keys the file has today (guards the scan itself)`; verify.sh `no .env files tracked`, `basic secret pattern scan on changed files` | **PASS** |
@@ -52,7 +53,8 @@ task 3's login form" warning, password length 12, letters and digits, leaked-pas
 secure password change, OTP expiry 900, OTP length 6, 60 s email interval, anonymous sign-ins off, manual linking off,
 phone off, exact site/redirect URLs), plus the build-time `NEXT_PUBLIC_SUPABASE_URL` note. No secret values (credentials
 and the Turnstile secret "typed into the dashboard only"). It states that the person applies it and agents never do
-(AGENT_RULES §4). Missing only the post-deploy proof P1 below, which this gate adds.
+(AGENT_RULES §4). The post-deploy proof P1 below is now item 22 (orchestrator note in the brief); checked in the
+re-gate section.
 
 ## L1 decision (row 9 live check)
 
@@ -97,15 +99,16 @@ and before any real user signs up. Task 3 (login) must not be released to real u
 4. Record the ten status codes and the date in `tasks/decisions.md`. Your IP's verification budget is used up for
    about 5 minutes afterwards.
 
-Owners: the person runs P1; devops-cicd adds P1 to the production checklist / deploy runbook when it next touches it.
+Owners: the person runs P1 (checklist item 22 in `tasks/2b/TASK_BRIEF.md`); devops-cicd carries it into the deploy
+runbook when it next touches it.
 
 ## Automated results
 
 | Check | Result |
 |-------|--------|
-| `npm test` | 2 files, 44/44 pass |
-| `bash scripts/verify.sh --brief tasks/2b/TASK_BRIEF.md` (with DB, under the shared lock) | `verify.sh: PASS 18/18 (1 skipped)`; skipped: `test:e2e` (no script). Includes allowed paths, RLS static check, no `.env` tracked, secret pattern scan, client bundle has no server secrets, no unsanitized `dangerouslySetInnerHTML`, migrations apply, `supabase test db` |
-| `npm audit --audit-level=high` | 0 vulnerabilities |
+| `npm test` | 2 files, 44/44 pass (re-run at `fc61959`) |
+| `bash scripts/verify.sh --brief tasks/2b/TASK_BRIEF.md` (with DB, under the shared lock; re-run at `fc61959` with PR #9's order) | `verify.sh: PASS 18/18 (1 skipped)`; skipped: `test:e2e` (no script). Includes allowed paths, RLS static check, no `.env` tracked, secret pattern scan, client bundle has no server secrets, no unsanitized `dangerouslySetInnerHTML`, migrations apply, `supabase test db` |
+| `npm audit --audit-level=high` | 0 vulnerabilities (re-run at `fc61959`) |
 | Secret scan | verify.sh basic pattern scan PASS (gitleaks not installed locally; CI runs gitleaks on push). S12 PASS. No secret printed during this gate. |
 | Supabase security advisors | Not run: no DB objects changed in 2b and cloud tools are not used by this gate |
 | RLS check | verify.sh static RLS check PASS (no tables changed) |
@@ -121,13 +124,38 @@ Owners: the person runs P1; devops-cicd adds P1 to the production checklist / de
 
 ## Other findings (not blocking)
 
-1. **"Five headers" wording (product-spec):** AC2/AC3 say five; the threat model specifies six (adds HSTS). Code and
-   tests use six, which is correct. product-spec updates the AC wording.
+1. **"Five headers" wording:** resolved. The orchestrator changed AC2/AC3 to "six headers" (threat model adds HSTS);
+   code and tests use six.
 2. **Header values are fixed at `next build`** (devops-cicd observed): `NEXT_PUBLIC_SUPABASE_URL` must be in the
    hosting build environment or `connect-src` blocks Supabase (fails closed, as specified). Already on the checklist.
 3. **`email_sent` not enforced locally** without `[auth.email.smtp]` (`GOTRUE_RATE_LIMIT_EMAIL_SENT=360000`): expected,
    not asserted by any test; production value is on the checklist.
 4. **Future live auth tests (task 2c):** since the local stack doesn't rate-limit at all, automated rate-limit tests
    can't run against it; any such test must target an environment that sets the rate-limit header, or be skipped with
-   a reason. Lesson L17 (qa-test) records this.
+   a reason. Lesson L21 (renumbered from L17 by the merge) records this.
 5. 'unsafe-inline' in `script-src` remains a known, accepted gap until the nonce CSP in task 3 (person's Q3).
+
+## Re-gate after main merge
+
+Trigger: the orchestrator merged origin/main into the branch (`fc61959`, PR #8 tasks docs and PR #9 verify.sh reorder)
+after the first gate (`4e4be4a`) and the code review (`7e510e5`, APPROVE). Checked at HEAD `fc61959`, origin/main fetched:
+
+- `git diff 4e4be4a HEAD -- next.config.ts supabase/config.toml tests/` is empty: code, config and tests are byte for
+  byte what the first gate judged. All row results above stand.
+- `git diff origin/main...HEAD` touches only `next.config.ts`, `supabase/config.toml`, `tests/integration/**`
+  (2 files), `specs/2b/**` and `tasks/**` (2b brief, board, lessons). verify.sh scope check PASS.
+- No conflict markers anywhere in the tree (`git grep` for `<<<<<<<` / `>>>>>>>` / `|||||||` at line start: none).
+- AC2/AC3 now say "six headers", matching the threat model and the tests (finding 1 resolved).
+- Checklist item 22 (orchestrator note in `tasks/2b/TASK_BRIEF.md`) matches P1: same timing (after first deploy, after
+  the rate-limit item, before any real user), same four steps (dashboard shows 5 per 5 min; 10 wrong-OTP verify calls
+  with the publishable/anon key in a shell variable only; pass = 429 at or before attempt 6 and on every later attempt,
+  never 200; no 429 by attempt 9 = stop and tell security; record the codes and date in `tasks/decisions.md`), and the
+  task 3 release block. It holds only placeholders (`<project-ref>`, `<publishable/anon key>`, `<own test address>`):
+  no secrets.
+- Lessons: L17 renumbered to L21 (references above updated); L22 (catch-up merge makes gates stale) is process only.
+- PR #9's `scripts/verify.sh` change only moves the database section before the project checks; no check was added,
+  removed or weakened, so it doesn't change this task's security evidence. verify.sh still runs all secret, RLS, XSS,
+  scope and bundle checks.
+- `npm test` 44/44; `verify.sh: PASS 18/18 (1 skipped)` (test:e2e, no script); `npm audit` 0 vulnerabilities.
+
+Result unchanged: PASS, with P1 (checklist item 22) required post-deploy.
