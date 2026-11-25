@@ -2,7 +2,7 @@
 // and static checks on .github/workflows/gate.yml (AC23, AC24). Brief: tasks/4b/TASK_BRIEF.md.
 //
 // Each fixture test builds a throwaway git repo in the OS temp dir (deleted after the test): branch `main` with
-// app/page.tsx, tasks/board.md, tasks/decisions.md, scripts/tool.sh, and the task branch `ci/9x-demo`. The script
+// app/page.tsx, tasks/0/TASK_BRIEF.md, tasks/decisions.md, scripts/tool.sh, and the task branch `ci/9x-demo`. The script
 // is run from this worktree (`bash <worktree>/scripts/gate-check.sh`) with the fixture repo as cwd; it finds its
 // repo with `git rev-parse --show-toplevel`, so it judges the fixture, never this repo.
 // Deterministic: fixed author/committer name, email and dates; system and global git config are ignored
@@ -92,7 +92,7 @@ class Repo {
     this.git(["config", "commit.gpgsign", "false"]);
     this.commit("main: initial", {
       "app/page.tsx": "export default function Page() {\n  return null;\n}\n",
-      "tasks/board.md": "# Board\n\n- row 1\n",
+      "tasks/0/TASK_BRIEF.md": "# Task 0\n\n- row 1\n",
       "tasks/decisions.md": "# Decisions\n\n- d1\n",
       "scripts/tool.sh": "#!/usr/bin/env bash\necho tool\n",
       ...mainFiles,
@@ -300,15 +300,15 @@ describe("gate-check.sh freshness (task 4b AC1-AC14: L22, L17, S5, regressions)"
     expectBothStale(r.run());
   });
 
-  it("AC7 (L22): catch-up merge with a conflict only in tasks/board.md -> PASS", { timeout: TIMEOUT }, () => {
+  it("AC7 (L22): catch-up merge with a conflict only in tasks/0/TASK_BRIEF.md -> PASS", { timeout: TIMEOUT }, () => {
     const r = taskRepo();
-    r.commit("chore: board on branch", { "tasks/board.md": "# Board\n\n- row 1 (branch)\n" });
+    r.commit("chore: task 0 brief on branch", { "tasks/0/TASK_BRIEF.md": "# Task 0\n\n- row 1 (branch)\n" });
     r.gates();
     r.checkout(["main"]);
-    r.commit("main: board", { "tasks/board.md": "# Board\n\n- row 1 (main)\n" });
+    r.commit("main: task 0 brief", { "tasks/0/TASK_BRIEF.md": "# Task 0\n\n- row 1 (main)\n" });
     r.checkout([BRANCH]);
     expect(r.gitStatus(["merge", "--no-edit", "main"])).not.toBe(0);
-    r.write({ "tasks/board.md": "# Board\n\n- row 1 (resolved)\n" });
+    r.write({ "tasks/0/TASK_BRIEF.md": "# Task 0\n\n- row 1 (resolved)\n" });
     r.git(["add", "-A"]);
     r.git(["commit", "-q", "--no-edit"]);
     const res = r.run();
@@ -372,11 +372,11 @@ describe("gate-check.sh freshness (task 4b AC1-AC14: L22, L17, S5, regressions)"
     expectBothStale(r.run());
   });
 
-  it("AC12 (S5): tasks/board.md and tasks/9x/TASK_BRIEF.md after the gates -> PASS", { timeout: TIMEOUT }, () => {
+  it("AC12 (S5): tasks/9x/notes.md and tasks/9x/TASK_BRIEF.md after the gates -> PASS", { timeout: TIMEOUT }, () => {
     const r = taskRepo();
     r.gates();
     r.commit("docs: handoff", {
-      "tasks/board.md": "# Board\n\n- row 1\n- 9x\n",
+      "tasks/9x/notes.md": "# 9x notes\n\n- after the gates\n",
       "tasks/9x/TASK_BRIEF.md": "# 9x\n\nHandoff\n",
     });
     expectPass(r.run());
