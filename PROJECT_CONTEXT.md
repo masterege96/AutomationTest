@@ -36,7 +36,7 @@ Every version in `package.json` is exact (`.npmrc` has `save-exact=true` and `en
 | Typecheck | `npm run typecheck` |
 | Lint | `npm run lint` |
 | Unit/integration tests | `npm test` |
-| End-to-end tests | none yet (`test:e2e` script added by qa-test when Playwright is approved) |
+| End-to-end tests | `npm run test:e2e` (Playwright, Chromium only; builds and starts the app itself; needs the local stack env, see the devops-cicd Handoff in `tasks/3/TASK_BRIEF.md`) |
 | Build | `npm run build` |
 | Start local DB | `npx supabase start` |
 | Reset local DB from migrations | `npx supabase db reset` |
@@ -51,12 +51,12 @@ Use `npx supabase` so the pinned CLI from `node_modules` runs, not a global inst
 
 ## Conventions
 
-- **Folder layout:** Next.js App Router at the repo root (no `src/`): `app/` pages and layouts, `app/api/**` route handlers, `components/`, `lib/client/`, `lib/server/`, `supabase/migrations/`, `supabase/tests/`, `tests/{integration,e2e,abuse}/`. Import alias `@/*` maps to the repo root.
+- **Folder layout:** Next.js App Router at the repo root (no `src/`): `app/` pages and layouts, `app/api/**` route handlers, `components/`, `lib/client/`, `lib/server/`, `supabase/migrations/`, `supabase/tests/`, `tests/integration/` (Vitest), `tests/e2e/` (Playwright; HTTP abuse tests in `tests/e2e/abuse/`, since they need the running app), colocated unit tests `*.test.ts` next to the code in `lib/`. Import alias `@/*` maps to the repo root.
 - **Naming (files, components, tables, columns):** Components PascalCase (`TodoList.tsx`), other TS files kebab-case, tables plural snake_case (`todos`), columns snake_case, migrations `<timestamp>_<snake_case>.sql` from `supabase migration new`.
 - **API style (route handlers / server actions / edge functions):** route handlers under `app/api/**` (the person, 2026-11-25, `tasks/decisions.md`).
-- **Validation library:** not decided yet (security baseline row 5 suggests zod; needs approval as a new dependency).
+- **Validation library:** zod (approved by the person for task 3, 2026-11-25); strict objects at the API boundary.
 - **Error format returned by APIs:** `{ "error": { "code": "...", "message": "..." } }` (the person, 2026-11-25).
-- **Where an example of each lives:** migration `supabase/migrations/*_init.sql`, DB test `supabase/tests/00_bootstrap_test.sql`, page `app/page.tsx`. No API route, component or unit test yet: the first feature task sets the example.
+- **Where an example of each lives:** migration `supabase/migrations/*_create_todos.sql`, DB test `supabase/tests/03_todos_test.sql`, page `app/page.tsx`, API route `app/api/todos/route.ts`, component `components/TodoList.tsx`, unit test `lib/server/body.test.ts`, integration test `tests/integration/csp.test.ts`, e2e test `tests/e2e/todos.spec.ts`, abuse test `tests/e2e/abuse/row2-idor.spec.ts`.
 
 ## Role paths
 
@@ -83,6 +83,7 @@ path may belong to two roles.
 | `SUPABASE_ACCESS_TOKEN` | CI only (drift check) | GitHub Environment `production` secret (main only) |
 | `SUPABASE_DB_PASSWORD` | CI only (drift check) | GitHub Environment `production` secret (main only) |
 | `SUPABASE_PROJECT_ID` | CI only (drift check) | GitHub Environment `production` secret (main only) |
+| `MAILPIT_URL` | tests only (local and CI `verify` job) | not stored: read at run time from `npx supabase status -o env` (local stack, task 3) |
 
 ## Security baseline: rows that don't apply
 
