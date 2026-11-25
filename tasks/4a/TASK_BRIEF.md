@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | SPEC_READY |
+| State | IN_REVIEW |
 | Owner role | devops-cicd (`scripts/board.sh`, `scripts/lessons.sh`, the framework doc edits under the person's label, the state migration of existing briefs); qa-test (`tests/integration/**` tests of the two scripts) |
 | Branch | `chore/4a-per-task-files` |
 | Worktree | `../wt-4a-orchestrator` (single worktree; devops-cicd first, then qa-test, in sequence, never at the same time) |
@@ -231,3 +231,9 @@ a template, it stops and asks (`BLOCKED`) rather than widening the scope.
 - **Script bugs found:** none. All AC1-AC9 behaviour matches the brief and devops-cicd's stated choices.
 - **Left to do:** security gate, review, the person's `framework-change-approved` label; CI (Linux) run of `npm test`
   for AC15. 4a's State is still `SPEC_READY` (orchestrator moves it).
+
+### orchestrator, 2026-11-25 (verify)
+
+- qa-test fixed AC13's self-match in ab7e539 (the grep now excludes the test file).
+- `bash scripts/verify.sh` (full, with DB, local stack env exported in the shell only): `verify.sh: PASS 19/19 (0 skipped)`.
+- State → IN_REVIEW; security gate and code review next, each in a fresh context.
