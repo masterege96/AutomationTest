@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | IN_REVIEW |
+| State | DONE |
 | Owner role | git-release |
 | Branch | `chore/3c-post-deploy` |
 | Worktree | `../wt-3c-git-release` |
