@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | SPEC_READY |
+| State | IN_REVIEW |
 | Owner role | orchestrator (drafts the text in `roles/*.md` and `ORCHESTRATOR.md`, the person's files; the person approves the exact text with the `framework-change-approved` label, AGENT_RULES 18a) |
 | Branch | `chore/4h-role-lessons` |
 | Worktree | `../wt-4h-roles` |
@@ -361,3 +361,7 @@ the gates would have to run again. A clean catch-up merge doesn't make the gates
 the other open PRs for conflicts.
 
 ```
+
+### orchestrator, 2026-11-26 (verify)
+
+- Main (4d) merged in (e258e8f). Full `bash scripts/verify.sh`: `verify.sh: PASS 20/20 (0 skipped)`. State → IN_REVIEW; gates next, fresh contexts.
