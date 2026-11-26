@@ -625,6 +625,25 @@ describe.concurrent("verify.sh client-bundle scan (AC1-AC13)", { timeout: TEST_T
     expectVerifyPass(expect, r);
   });
 
+  it("N3: bundle file with a NUL byte and an sb_secret_ key -> FAIL sb-secret-key-pattern", async ({ expect }) => {
+    const r = await verify({ status: null, bundle: { [APP]: `\u0000bin\u0000;k="${fakeSecretKey()}";\n` } });
+    expectVerifyFail(expect, r, leakLine("sb-secret-key-pattern"));
+    expect(detailOf(r.stdout, leakLine("sb-secret-key-pattern"))[0]).toBe(`sb-secret-key-pattern: ${APP}`);
+  });
+
+  it("N3: bundle file with a NUL byte and a service-role JWT -> FAIL service-role-jwt-pattern", async ({ expect }) => {
+    const r = await verify({ status: null, bundle: { [APP]: `\u0000bin\u0000;t="${fakeJwt("service_role")}";\n` } });
+    expectVerifyFail(expect, r, leakLine("service-role-jwt-pattern"));
+    expect(detailOf(r.stdout, leakLine("service-role-jwt-pattern"))[0]).toBe(`service-role-jwt-pattern: ${APP}`);
+  });
+
+  it("N3: bundle file with a NUL byte and the local SERVICE_ROLE_KEY value -> FAIL SERVICE_ROLE_KEY, value never shown", async ({ expect }) => {
+    const s = fakeStatus();
+    const r = await verify({ status: s, bundle: { [APP]: `\u0000bin\u0000;v="${s.SERVICE_ROLE_KEY}";\n` } });
+    expectVerifyFail(expect, r, leakLine("SERVICE_ROLE_KEY"));
+    expectNoValues(expect, r, SERVER_NAMES.map((n) => s[n]));
+  });
+
   for (const name of SHELL_SECRET_VARS) {
     it(`AC11: shell-exported ${name} (16+ chars) in the bundle -> FAIL ${name}`, async ({ expect }) => {
       const s = fakeStatus();
@@ -847,6 +866,46 @@ describe.concurrent("verify.sh destructive scan (AC14-AC19)", { timeout: TEST_TI
     expect(hits(r.stdout)).toEqual(["3:  delete from t;"]);
   });
 
+  // Gate round 1 (F1 / review 1): the lexer follows Postgres quoting. SQL as JS strings: "\\" is one backslash in the file.
+  const F1_FAIL: [string, string, number][] = [
+    ["$$ string holding a quote", "comment on table t is $$Users' data$$;\nselect 'x' || '--'; delete from t;\n", 2],
+    ["E-string with an escaped quote, then --", "select E'it\\'s -- '; drop table missed;\n", 1],
+    ["$q$ tag holding ; grant and '", "select $q$ ; grant all on t to x ' $q$; truncate t; select $$'$$;\n", 1],
+    ["E-string escapes around a grant", "select E'\\'; grant all on t to x '; drop table t; select E'\\'';\n", 1],
+    ["quoted identifier with ;", 'grant select on "x;y" to anon; drop view v;\n', 1],
+    ["tag right after a tag", "select $a$x$a$$b$ -- $b$; drop table t;\n", 1],
+    ["E-string continuation", "select E'a'\n  -- c\n'\\' -- '; drop table t;\n", 3],
+    ["standard_conforming_strings off (ambiguous: raw scan)", "set standard_conforming_strings = off;\nselect 'it\\'s -- '; drop table missed;\n", 2],
+    ["unterminated string (raw scan)", "select 'abc;\n/* x */ drop table t;\n", 2],
+    ["$ in a GRANT is not exempt", "grant truncate on table a$b to anon;\n", 1],
+    ["' in a GRANT is not exempt", "grant truncate on \"it's\" to anon;\n", 1],
+    ["inner tag inside an outer one", "do $a$ begin perform $b$ $a$ $b$; end $a$;\nselect '--'; truncate t;\n", 2],
+    ["$1 is not a quote", "prepare p as select $1; delete from t;\n", 1],
+    ["$$ inside a word", "select a$$b, 'x'; delete from t; -- $$\n", 1],
+  ];
+  for (const [label, sql, line] of F1_FAIL) {
+    it(`F1: ${label}: ${JSON.stringify(sql)} -> FAIL with hit ${line}:`, async ({ expect }) => {
+      const r = await migrationRun(sql);
+      expectVerifyFail(expect, r, DESTR_FAIL);
+      expect(detailOf(r.stdout, DESTR_FAIL)[0]).toBe(`${MIG}:`);
+      expect(hits(r.stdout)).toEqual([`${line}:${sql.split("\n")[line - 1]}`]);
+    });
+  }
+
+  const F1_PASS: string[] = [
+    "select E'it\\'s fine'; -- drop table x\n",
+    "create function f() returns int language sql as $fn$ select 1 $fn$; -- drop table x\n",
+    "grant truncate on t to anon; -- it's ok, $$ here\n",
+  ];
+  for (const sql of F1_PASS) {
+    it(`F1: exemption kept: ${JSON.stringify(sql)} -> PASS`, async ({ expect }) => {
+      const r = await migrationRun(sql);
+      expect(section(r.stdout, "migrations")).toContain(DESTR_PASS);
+      expect(r.stdout).not.toContain(DESTR_FAIL);
+      expectVerifyPass(expect, r);
+    });
+  }
+
   it("AC16: only new migrations are scanned (a committed destructive migration is not reported)", async ({ expect }) => {
     const r = await verify({
       noPackageJson: true,
@@ -938,6 +997,77 @@ describe.concurrent("verify.sh --passWithNoTests check (AC20-AC24)", { timeout: 
     });
     expect(aroundTest(r.stdout)).toEqual(["  PASS  npm run lint", L5_PASS_NONE]);
     expectVerifyPass(expect, r);
+  });
+
+  // N9 (gate round 1): the kebab-case CLI flag and passWithNoTests: true in a root vitest.config.* count too.
+  const KEBAB_HINT = "Remove --pass-with-no-tests from package.json#scripts.test (tasks/lessons.md L5).";
+  const cfgHint = (f: string) => `Remove passWithNoTests: true from ${f} (tasks/lessons.md L5).`;
+  const cfg = (line: string) =>
+    `import { defineConfig } from "vitest/config";\nexport default defineConfig({\n  test: {\n    ${line}\n  },\n});\n`;
+
+  it("N9: scripts.test with --pass-with-no-tests + a test file -> FAIL, path and the kebab fix line", async ({ expect }) => {
+    const r = await l5Run("node noop.js --pass-with-no-tests", { "lib/foo.test.ts": "\n" });
+    expect(aroundTest(r.stdout)).toEqual(["  PASS  npm run lint", L5_FAIL]);
+    expect(detailOf(r.stdout, L5_FAIL)).toEqual(["lib/foo.test.ts", KEBAB_HINT]);
+    expectVerifyFail(expect, r, L5_FAIL);
+  });
+
+  it("N9: camelCase flag -> detail unchanged (AC20)", async ({ expect }) => {
+    const r = await l5Run(WITH_FLAG, { "lib/foo.test.ts": "\n" });
+    expect(detailOf(r.stdout, L5_FAIL)).toEqual(["lib/foo.test.ts", L5_HINT]);
+    expectVerifyFail(expect, r, L5_FAIL);
+  });
+
+  for (const [label, line] of [
+    ["passWithNoTests: true", "passWithNoTests: true,"],
+    ['"passWithNoTests" : true', '"passWithNoTests" : true,'],
+    ["'passWithNoTests':true", "'passWithNoTests':true,"],
+  ] as const) {
+    it(`N9: vitest.config.ts with ${label}, scripts.test without the flag + a test file -> FAIL with the config fix line`, async ({ expect }) => {
+      const r = await l5Run(undefined, { "lib/foo.test.ts": "\n", "vitest.config.ts": cfg(line) });
+      expect(aroundTest(r.stdout)).toEqual(["  PASS  npm run lint", L5_FAIL]);
+      expect(detailOf(r.stdout, L5_FAIL)).toEqual(["lib/foo.test.ts", cfgHint("vitest.config.ts")]);
+      expectVerifyFail(expect, r, L5_FAIL);
+    });
+  }
+
+  it("N9: vitest.config.mts with passWithNoTests: true -> the fix line names that file", async ({ expect }) => {
+    const r = await l5Run(undefined, { "lib/foo.test.ts": "\n", "vitest.config.mts": cfg("passWithNoTests: true,") });
+    expect(detailOf(r.stdout, L5_FAIL)).toEqual(["lib/foo.test.ts", cfgHint("vitest.config.mts")]);
+    expectVerifyFail(expect, r, L5_FAIL);
+  });
+
+  it("N9: flag in scripts.test and in the config -> one fix line per place", async ({ expect }) => {
+    const r = await l5Run(WITH_FLAG, { "lib/foo.test.ts": "\n", "vitest.config.ts": cfg("passWithNoTests: true,") });
+    expect(detailOf(r.stdout, L5_FAIL)).toEqual(["lib/foo.test.ts", L5_HINT, cfgHint("vitest.config.ts")]);
+    expectVerifyFail(expect, r, L5_FAIL);
+  });
+
+  for (const [label, line] of [
+    ["// passWithNoTests: true", "// passWithNoTests: true,"],
+    ["/* passWithNoTests: true */", "/* passWithNoTests: true */"],
+    ["passWithNoTests: false", "passWithNoTests: false,"],
+  ] as const) {
+    it(`N9: vitest.config.ts with ${label} -> PASS test script has no --passWithNoTests`, async ({ expect }) => {
+      const r = await l5Run(undefined, { "lib/foo.test.ts": "\n", "vitest.config.ts": cfg(line) });
+      expect(aroundTest(r.stdout)).toEqual(["  PASS  npm run lint", L5_PASS]);
+      expectVerifyPass(expect, r);
+    });
+  }
+
+  it("N9: config with passWithNoTests: true and no test files -> PASS may use --passWithNoTests", async ({ expect }) => {
+    const r = await l5Run(undefined, { "lib/foo.ts": "\n", "vitest.config.ts": cfg("passWithNoTests: true,") });
+    expect(aroundTest(r.stdout)).toEqual(["  PASS  npm run lint", L5_PASS_NONE]);
+    expectVerifyPass(expect, r);
+  });
+
+  it("N9: this repo's vitest.config.* sets no passWithNoTests: true", ({ expect }) => {
+    for (const n of readdirSync(ROOT).filter((n) => /^vitest\.config\./.test(n))) {
+      const live = readFileSync(join(ROOT, n), "utf8")
+        .split(/\r?\n/)
+        .filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l));
+      expect(live.some((l) => /passWithNoTests["']?\s*:\s*true/.test(l)), n).toBe(false);
+    }
   });
 
   it("AC23: no test script -> no L5 line, existing 'script test missing' FAIL unchanged", async ({ expect }) => {
@@ -1322,16 +1452,66 @@ describe.concurrent("bootstrap-check S19 accepted risk (AC35-AC37)", { timeout: 
     expectReadOnly(expect, r.calls);
   });
 
+  // N7 (gate round 1): only "no deployment branch policy / all branches" (AC27a) is the accepted risk. AC27b-e and an
+  // empty custom list FAIL even while the decision is open (contract change recorded by devops-cicd; stricter).
   for (const [label, sc] of AC27) {
-    it(`AC35: decision open, AC27 ${label} -> RISK policy line with fix, '1 accepted risk', exit 0`, async ({ expect }) => {
-      const r = await bootstrap(sc, [], DEC_FILE);
-      expect(outLines(r.stdout), r.stdout).toContain(POL_RISK);
-      expect(detailOf(r.stdout, POL_RISK).filter((l) => l.startsWith(POL_FIX))).toHaveLength(1);
-      expect(r.stdout).not.toContain(POL_FAIL);
-      expect(outLines(r.stdout)).toContain(SEC_PASS);
+    if (label.startsWith("(a)")) {
+      it(`AC35/N7: decision open, AC27 ${label} -> RISK policy line with fix, '1 accepted risk', exit 0`, async ({ expect }) => {
+        const r = await bootstrap(sc, [], DEC_FILE);
+        expect(outLines(r.stdout), r.stdout).toContain(POL_RISK);
+        expect(detailOf(r.stdout, POL_RISK).filter((l) => l.startsWith(POL_FIX))).toHaveLength(1);
+        expect(r.stdout).not.toContain(POL_FAIL);
+        expect(outLines(r.stdout)).toContain(SEC_PASS);
+        expectBootPassWithRisk(expect, r, 1);
+      });
+    } else {
+      it(`AC35/N7: decision open, AC27 ${label} -> still FAIL production deploys only from main, no RISK, exit 1`, async ({ expect }) => {
+        const r = await bootstrap(sc, [], DEC_FILE);
+        expect(outLines(r.stdout), r.stdout).toContain(POL_FAIL);
+        expect(fixOf(r.stdout, POL_FAIL).filter((l) => l.startsWith(POL_FIX))).toHaveLength(1);
+        expect(r.stdout).not.toContain(POL_RISK);
+        expect(outLines(r.stdout)).toContain(SEC_PASS);
+        expect(noRiskText(r.stdout), r.stdout).toBe(true);
+        expectBootFailWithRisk(expect, r, 1, 0);
+      });
+    }
+  }
+
+  const NAMED = ["SUPABASE_ACCESS_TOKEN", "SUPABASE_DB_PASSWORD", "SUPABASE_PROJECT_ID"];
+  const NAMED_SUBSETS = [["SUPABASE_DB_PASSWORD"], ["SUPABASE_PROJECT_ID", "SUPABASE_ACCESS_TOKEN"], NAMED];
+  for (const subset of NAMED_SUBSETS) {
+    it(`AC35/N7: decision open, repo secrets ${subset.join(" + ")} (named in the decision) -> RISK listing them, exit 0`, async ({ expect }) => {
+      const r = await bootstrap({ ...GOOD, secrets: secretsPage("OTHER_TOKEN", ...subset) }, [], DEC_FILE);
+      const line = `  RISK  no repository-level SUPABASE_* secrets (found: ${[...subset].sort().join(", ")})${RISK_SUFFIX}`;
+      expect(outLines(r.stdout), r.stdout).toContain(line);
+      expect(detailOf(r.stdout, line)).toEqual([SEC_FIX]);
       expectBootPassWithRisk(expect, r, 1);
     });
   }
+
+  for (const extra of [["SUPABASE_SERVICE_ROLE_KEY"], ["SUPABASE_URL", "SUPABASE_ANON_KEY"]]) {
+    it(`AC35/N7: decision open, the named secrets plus ${extra.join(", ")} -> FAIL listing every SUPABASE_* name, no RISK`, async ({ expect }) => {
+      const r = await bootstrap({ ...GOOD, secrets: secretsPage(...NAMED, "OTHER_TOKEN", ...extra) }, [], DEC_FILE);
+      const line = `${SEC_FAIL} (found: ${[...NAMED, ...extra].sort().join(", ")})`;
+      expect(outLines(r.stdout), r.stdout).toContain(line);
+      expect(detailOf(r.stdout, line)).toEqual([SEC_FIX]);
+      expect(noRiskText(r.stdout), r.stdout).toBe(true);
+      expectBootFailWithRisk(expect, r, 1, 0);
+    });
+  }
+
+  it("AC35/N7: decision open, only an unnamed SUPABASE_* secret -> FAIL, no RISK", async ({ expect }) => {
+    const r = await bootstrap({ ...GOOD, secrets: secretsPage("SUPABASE_SERVICE_ROLE_KEY") }, [], DEC_FILE);
+    expect(outLines(r.stdout), r.stdout).toContain(`${SEC_FAIL} (found: SUPABASE_SERVICE_ROLE_KEY)`);
+    expectBootFailWithRisk(expect, r, 1, 0);
+  });
+
+  it("AC35/N7: decision open, policy null + an unnamed secret -> policy RISK, secrets FAIL, 'FAIL 1 of <t> (1 accepted risk, ...)'", async ({ expect }) => {
+    const r = await bootstrap({ ...FINDINGS, secrets: secretsPage("SUPABASE_ACCESS_TOKEN", "SUPABASE_JWT_SECRET") }, [], DEC_FILE);
+    expect(outLines(r.stdout)).toContain(POL_RISK);
+    expect(outLines(r.stdout)).toContain(`${SEC_FAIL} (found: SUPABASE_ACCESS_TOKEN, SUPABASE_JWT_SECRET)`);
+    expectBootFailWithRisk(expect, r, 1, 1);
+  });
 
   it("AC35: decision open, only the secrets finding -> one RISK, '1 accepted risk', exit 0", async ({ expect }) => {
     const r = await bootstrap({ ...GOOD, secrets: FINDINGS.secrets }, [], DEC_FILE);
