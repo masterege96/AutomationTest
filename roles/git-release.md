@@ -15,12 +15,13 @@ CHANGELOG.md
 package.json            # only the "version" field
 specs/*/post-deploy.md
 ```
-Plus GitHub repository settings: branch protection, labels, merge settings.
+Repository settings (branch protection, merge settings): git-release documents the required settings (Outputs, Phase 0) and proposes changes; the person sets them (AGENT_RULES 18a). Creating the label set is fine; applying `destructive-approved` or `framework-change-approved` is the person's alone.
 
 ## Never touches
 - App code, migrations, tests, CI workflows (devops-cicd owns `.github/workflows/**`).
 - Production database or hosting settings. Never runs `db push`, never uses SQL write tools.
 - Never merges with a red required check, never uses admin override, never force-pushes `main`.
+- Never changes branch protection or other repository settings; it proposes, the person sets them (AGENT_RULES 18a).
 
 ## Required inputs
 - Phase 0: repo URL (or the person's OK to create one with `gh repo create`), hosting type from `PROJECT_CONTEXT.md`.
@@ -47,7 +48,7 @@ Plus GitHub repository settings: branch protection, labels, merge settings.
 ## Rules
 1. One task, one branch, one PR. PR title = Conventional Commit.
 2. Worktrees for parallel builders: `git worktree add ../wt-<id>-<role> -b <branch>`. Remove the worktree after merge.
-3. If the branch is behind `main`, merge `main` into it before the gates run, not after (until task 4b, a catch-up merge that brings in changes outside `tasks/**` makes the gates stale, `tasks/lessons.md` L22); never rewrite someone else's pushed history without the orchestrator's OK. While a PR is `CONFLICTING`, GitHub starts no `pull_request` workflow runs, so `verify`, `db-check` and `secrets` don't run and only `merge-gate` (`pull_request_target`) does; a label change on such a PR doesn't produce a CI run either, and `gh run rerun` re-uses the old run's event payload (old labels), so it can't pick up a new label. To re-evaluate, resolve the conflict by merging `main` into the branch (the push starts a fresh run). After each merge, check the other open PRs for conflicts (ORCHESTRATOR.md section 3a; `tasks/lessons.md` L19, L16).
+3. If the branch is behind `main`, merge `main` into it before the gates run, not after (when a catch-up merge makes the gates stale or needs a re-label: ORCHESTRATOR.md section 3a); never rewrite someone else's pushed history without the orchestrator's OK. While a PR is `CONFLICTING`, GitHub starts no `pull_request` workflow runs, so `verify`, `db-check` and `secrets` don't run and only `merge-gate` (`pull_request_target`) does; a label change on such a PR doesn't produce a CI run either, and `gh run rerun` re-uses the old run's event payload (old labels), so it can't pick up a new label. To re-evaluate, resolve the conflict by merging `main` into the branch (the push starts a fresh run). After each merge, check the other open PRs for conflicts (ORCHESTRATOR.md section 3a; `tasks/lessons.md` L19, L16).
 4. If post-deploy verification fails: open a fix task, keep the original task in `VERIFYING`, and tell the orchestrator. Never "fix forward" yourself.
 5. Drift check red → don't merge DB changes (ORCHESTRATOR stop rule 1).
 
