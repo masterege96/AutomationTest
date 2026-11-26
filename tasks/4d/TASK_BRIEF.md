@@ -599,3 +599,11 @@ Fixes for security gate round 1 (F1 FAIL, N3, N7, N9) and code review round 1 (f
 - Full `bash scripts/verify.sh`: `verify.sh: PASS 20/20 (0 skipped)`. Gate round 2 next, fresh contexts.
 - Task 4b AC25 (live label check) done on throwaway PR #18 with the person, 2026-11-26 14:30-14:34 UTC: PASS → FAIL
   after a later protected push → PASS after re-label; PR closed unmerged.
+
+### orchestrator, 2026-11-26 (PR #19 CI fix, gate round 3)
+
+- PR #19's first CI `verify` failed one test on ubuntu (AC3 stale bundle passed): the fixture's stale files were < 2 s
+  older than verify.sh's backdated build marker. qa-test fixed the fixture (8026081: stale files get an mtime one hour
+  in the past; no assertion changed); verify-fixes.test.ts 191 passed locally. verify.sh unchanged (script fails closed
+  for a real stale bundle; two edge cases recorded in L4d.3).
+- Gate round 3 on the delta: security PASS, review APPROVE, each committed after the last code change.
