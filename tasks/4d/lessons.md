@@ -40,3 +40,10 @@ Closes: L5, L15, L27
 - Scan `.next/server/app` (prerendered pages) for secrets too; fixture verify runs inside `npm test` overwrite the
   fixed `/tmp/verify-*.log` paths (use `${TMPDIR:-/tmp}` / a per-run dir; ties in with 4g's lock).
 - Statements split over lines (`drop\ntable t`) are still not caught (same as main).
+- The fresh-build rule (L4d.2) has two narrow edge cases (qa-test, after the PR #19 CI failure): a build that only
+  deletes/renames stale files changes the file list without writing a bundle; stale files with a future mtime (clock
+  skew, restored caches) or one within the 2 s marker backdating count as fresh. Real Next.js builds write new chunks.
+  Suggested hardening: require at least one bundle file newer than the marker, in addition to a changed list.
+- PR #19's first CI run failed on Linux only: the stale-bundle fixture was < 2 s older than the backdated marker
+  (Windows passed by luck, Git Bash is slow). Fixed in the test (8026081). Lesson: fixtures that depend on mtimes set
+  them explicitly.
