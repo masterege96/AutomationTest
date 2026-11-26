@@ -310,3 +310,52 @@ into them is not required for the spoof check.
 
 - Q1-Q6: build with the stated defaults; the person sees them in the PR before adding the label.
 - No YAML parser is in PROJECT_CONTEXT: if a safe check is not possible with git + text tools, set BLOCKED with a proposal (no new dependency without the person).
+
+### devops-cicd, 2026-11-26 (interface, for qa-test)
+
+The 4b interface is unchanged (`FRAMEWORK_CHANGE_APPROVED`, `FRAMEWORK_LABEL_TIME`, `PR_HEAD_PUSHES`, same meaning
+and format; 4b tests need no change, AC28). Two **new, optional environment inputs**; when a variable is **unset**
+gate-check behaves exactly as in 4b (fixtures and local runs), when it is **set (even to an empty string)** it is
+used. gate.yml always sets both, from read-only GitHub API calls made when the run starts.
+
+| Variable | Meaning | Format | gate-check rule |
+|----------|---------|--------|-----------------|
+| `PR_CURRENT_LABELS` | The PR's labels as GitHub reports them now (`GET /repos/{repo}/issues/{pr}/labels`, all pages) | one label name per line, blank lines and trailing CR ignored | The label counts as on only when `FRAMEWORK_CHANGE_APPROVED=1` **and** one line is exactly `framework-change-approved`. Missing from the list → the 4b `  FAIL  pipeline/framework files changed without the person's 'framework-change-approved' label:` line (F2 / AC29). Consulted only when protected paths changed, like the other label inputs. |
+| `PR_CURRENT_BASE` | The PR's base branch as GitHub reports it now (`GET /repos/{repo}/pulls/{pr}`, `.base.ref`) | the branch name, exactly `main` to pass | Checked on every run where it is set: exactly `main` → `  PASS  PR base is main`, anything else (empty, another branch, more than one line) → `  FAIL  PR base is not main`. |
+
+In gate.yml `FRAMEWORK_CHANGE_APPROVED` is now derived from the same API label list (no expression reads
+`github.event.pull_request.labels`). A failed labels or base read fails the gate job in the read step with
+`::error::could not read the PR's current labels ...` / `::error::could not read the PR's current base branch ...`
+(Q4), so the Gate step never runs on a failed read.
+
+**New output lines** (prefixes stable; wording after the prefix may be matched by the quoted substrings below):
+
+- `  PASS  merge-gate spoofing: no workflow at the head can report merge-gate` (no spoof rule failed; always printed
+  in that case, the check always runs).
+- `  FAIL  merge-gate spoofing: <path>: <reason>`, one line per file and reason. Reasons (substrings):
+  - S14-A: `job id '<id>' is a reserved check name`; `job '<id>' is named '<name>', a reserved check name`;
+    `job '<id>' name contains a ${{ }} expression`.
+  - unreadable (AC7, also BOM/CRLF are accepted, not unreadable): `can't be read safely (line <n>: <why>)`.
+  - AC9: `is a symlink or submodule, can't be read safely` (for the file, or with `<path>` = `.github` /
+    `.github/workflows` when that is not a directory); a path git has to quote (non-ASCII, control characters)
+    under `.github` also fails as `can't be read safely`.
+  - AC15/AC24: `.github/workflows/gate.yml: changed gate.yml has a trigger other than pull_request_target (or its
+    triggers can't be read), so it isn't exempt` (plus the S14-A line for its `merge-gate` job).
+  - B1: `contains the text 'merge-gate' (line <n>)`.
+  - B2: `grants write access to checks or statuses (line <n>)`.
+  - B3: `leaves the token permissions to the repo default (no workflow-level permissions:, job '<id>' has none)`.
+- `  PASS  PR base is main (read from GitHub when the run started)` / `  FAIL  PR base is not main (GitHub reports
+  '<value>') ...` (only when `PR_CURRENT_BASE` is set).
+
+Last line and exit codes unchanged (`gate-check: PASS` 0, `gate-check: FAIL` 1, bad arguments 2).
+
+Reading model (so fixtures know what is "safe"): workflow files are listed with `git ls-tree -r <head>` and read
+with `git cat-file blob`, nothing from the working tree. A strict line-based reader accepts only: block mappings
+and sequences indented with spaces, plain keys (`[A-Za-z0-9_][A-Za-z0-9_.-]*`, optional spaces before `:`),
+single-line plain / single-quoted / double-quoted values, single-line flow collections, block scalars `|` `>` with
+`-`/`+` (no indentation indicator), comments, one leading `---`, a leading UTF-8 BOM, CRLF line ends. Anything
+else (anchors, aliases, tags, merge keys, explicit `?` keys, quoted keys, tabs outside block scalars, multi-line
+plain/quoted/flow values, a second document or `...`, directives, invalid UTF-8, control characters, a lone CR,
+duplicate top-level / job-id / job-level keys, a flow-mapping `jobs:` or job) → `can't be read safely`. A job
+`name:` that is empty, a block scalar, a flow value, contains a backslash in double quotes, or non-ASCII →
+`can't be read safely` too.
