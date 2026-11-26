@@ -31,8 +31,10 @@
 # read only when protected paths changed; anything missing or malformed is a FAIL):
 #   FRAMEWORK_CHANGE_APPROVED=1    the label is on the PR now
 #   FRAMEWORK_LABEL_TIME           time of the most recent 'labeled' event for the label,
-#                                  exactly YYYY-MM-DDTHH:MM:SSZ (UTC)
-#   PR_HEAD_PUSHES                 one line per push GitHub recorded on the PR's head
+#                                  exactly YYYY-MM-DDTHH:MM:SSZ (UTC). gate.yml counts only
+#                                  events by the repository owner with actor type User, and
+#                                  none if an 'unlabeled' event is as late or later (task 4c)
+#   PR_HEAD_PUSHES                one line per push GitHub recorded on the PR's head
 #                                  branch: "<YYYY-MM-DDTHH:MM:SSZ> <40-hex tip sha after
 #                                  the push>", any order; must include HEAD's sha
 # Push time (task 4b, F1 fix): a push is "same" when its tip is a commit git knows AND
@@ -68,9 +70,10 @@
 #   S14-A (every workflow file but the exempt gate file): no job id or job name: is a reserved
 #     name; a job name: containing ${{ fails whatever it evaluates to.
 #   B1 (changed files): the text merge-gate appears nowhere (case-insensitive).
-#   B2 (changed files): no workflow- or job-level permissions grant checks: write, statuses: write
-#     or write-all (the token write scopes are how a workflow without stored secrets posts a
-#     check run or commit status).
+#   B2 (changed files): no workflow- or job-level permissions grant write-all or write on checks,
+#     statuses (post a check run / commit status), issues, pull-requests (add the person's label),
+#     actions (re-run the gate) or security-events (upload results shown as a check). These token
+#     write scopes are how a workflow without stored secrets changes the gate's result or inputs.
 #   B3 (changed files): permissions: at the workflow level, or on every job (else the repo default
 #     applies, which may include checks/statuses write).
 #   Fail closed: the reader is a strict line-based subset of YAML (block mappings/sequences
@@ -86,11 +89,24 @@
 #   - a green merge-gate produced by ANOTHER base branch's gate.yml: a PR opened against a side
 #     branch (whose gate.yml may always pass), then retargeted to main, then that old run re-run.
 #     The re-run judges with the side branch's copy, so main's checks here never execute.
-#   - a check run or commit status named merge-gate posted onto the PR's head SHA by a workflow on
-#     another branch (not at the head), e.g. one that runs for a different PR or push and has a
-#     token with checks/statuses write.
+#   - a check run or commit status named merge-gate posted onto the PR's head SHA by a workflow
+#     that is not at the head: on another branch (a different PR or push), or from an EARLIER push
+#     of this same branch (a run still going, jobs last up to 6 h, or re-run later) whose token had
+#     checks/statuses write. If that file is gone again at the head, the net protected change can
+#     be empty, so not even the label is needed.
+#   - re-runs of gate runs created before a change to gate.yml / gate-check.sh: a re-run executes
+#     the workflow and this script from the main commit the ORIGINAL run used, so runs from before
+#     task 4c merged keep the 4b logic (payload labels, no spoof check, no base read). After merge
+#     every open PR needs a fresh gate run (a new push or label event), and the AC29 check uses only
+#     runs created after merge.
+#   - pull_request workflows run on the merge ref (refs/pull/N/merge: main's files plus the PR's),
+#     not the head tree. Safe while main's own workflows grant no checks/statuses (B2) write; a
+#     future main workflow with those scopes could combine with an unflagged step at the head.
 #   - workflows at the head that post a check with a stored secret other than GITHUB_TOKEN (Q5;
 #     the repo has none; the label review covers it).
+#   - anything done through the person's own account (a label or status set with their login):
+#     the gate can tell a workflow's bot from the owner, not the owner from an agent using the
+#     same account (AGENT_RULES 18a).
 #
 # Usage: scripts/gate-check.sh [--base <branch>] [--head <sha>] [--branch <name>]
 #
@@ -327,7 +343,9 @@ function classify(v,    c, i, n, ch, out, st, q, prev) {
 function permlevel(k, v) {
   k = tolower(trim(k)); v = tolower(trim(v))
   if (v != "read" && v != "write" && v != "none") unsafe("permissions: unknown level for '" k "'")
-  if (v == "write" && (k == "checks" || k == "statuses")) print "W\t" NR
+  # B2 scopes: checks/statuses post a check; issues/pull-requests can add the person's label;
+  # actions can re-run the gate; security-events can upload results shown as a check (security F1, F3).
+  if (v == "write" && (k == "checks" || k == "statuses" || k == "issues" || k == "pull-requests" || k == "actions" || k == "security-events")) print "W\t" NR
 }
 function permval(col,    v, parts, np, i, p, kk, vv) {
   if (VK == "E") { inperm = 1; permparent = col; permcind = 0; permcount = 0; return }
@@ -489,46 +507,50 @@ MG_RE='[Mm][Ee][Rr][Gg][Ee]-[Gg][Aa][Tt][Ee]'
 sfail() { echo "  FAIL  merge-gate spoofing: $1: $2"; SPOOF_FAIL=1; }
 # spoof_file <path> <blob> <changed 0|1>
 spoof_file() {
-  local p="$1" b="$2" changed="$3" size facts why line exempt=0 is_gate=0 r
+  local p="$1" b="$2" changed="$3" size facts why line exempt=0 is_gate=0 r T
   [ "$p" = ".github/workflows/gate.yml" ] && is_gate=1
-  size=$(git cat-file -s "$b" 2>/dev/null) || { sfail "$p" "can't be read safely (git cat-file failed)"; return; }
-  if [ "$(git cat-file blob "$b" | tr -d '\000' | wc -c | tr -d ' ')" != "$size" ]; then
+  # The blob is written once to a temp file and every check reads the file: each decision is made on
+  # the captured output ([ -n "$line" ]), never on a pipeline's status, so a big file can't make a
+  # check skip through SIGPIPE (review B-1), and the reader's line and reason are always reported.
+  if ! git cat-file blob "$b" > "$SPOOF_TMP" 2>/dev/null || ! size=$(git cat-file -s "$b" 2>/dev/null); then
+    sfail "$p" "can't be read safely (git cat-file failed)"; return
+  fi
+  if [ "$(tr -d '\000' < "$SPOOF_TMP" | wc -c | tr -d ' ')" != "$size" ]; then
     sfail "$p" "can't be read safely (NUL byte)"; return
   fi
-  if line=$(git cat-file blob "$b" | grep -naxvE "$U8_RE" | head -n 1 | cut -d: -f1) && [ -n "$line" ]; then
-    sfail "$p" "can't be read safely (line $line: not valid UTF-8)"; return
-  fi
-  if line=$(git cat-file blob "$b" | grep -naE "$CTRL_RE" | head -n 1 | cut -d: -f1) && [ -n "$line" ]; then
-    sfail "$p" "can't be read safely (line $line: control character or YAML 1.1 line break)"; return
-  fi
-  if ! facts=$(git cat-file blob "$b" | awk -v HI=$'[\x80-\xff]' "$SPOOF_AWK"); then
+  line=$(grep -m1 -naxvE "$U8_RE" "$SPOOF_TMP" | cut -d: -f1)
+  if [ -n "$line" ]; then sfail "$p" "can't be read safely (line $line: not valid UTF-8)"; return; fi
+  line=$(grep -m1 -naE "$CTRL_RE" "$SPOOF_TMP" | cut -d: -f1)
+  if [ -n "$line" ]; then sfail "$p" "can't be read safely (line $line: control character or YAML 1.1 line break)"; return; fi
+  if ! facts=$(awk -v HI=$'[\x80-\xff]' "$SPOOF_AWK" < "$SPOOF_TMP"); then
     sfail "$p" "can't be read safely (the reader failed)"; return
   fi
-  if why=$(printf '%s\n' "$facts" | sed -n "s/^U$TB\([0-9]*\)$TB\(.*\)\$/line \1: \2/p") && [ -n "$why" ]; then
+  line=""; [ "$changed" = 1 ] && line=$(grep -m1 -naE "$MG_RE" "$SPOOF_TMP" | cut -d: -f1)  # B1, used below
+  why=$(printf '%s\n' "$facts" | sed -n "s/^U$TB\([0-9]*\)$TB\(.*\)\$/line \1: \2/p")
+  if [ -n "$why" ]; then
     sfail "$p" "can't be read safely ($why)"
-    if [ "$changed" = 1 ] && line=$(git cat-file blob "$b" | grep -naE "$MG_RE" | head -n 1 | cut -d: -f1) && [ -n "$line" ]; then
-      sfail "$p" "contains the text 'merge-gate' (line $line)"
-    fi
+    [ -n "$line" ] && sfail "$p" "contains the text 'merge-gate' (line $line)"
     return
   fi
-  if ! printf '%s\n' "$facts" | grep -qxE $'T\t(prt|other)'; then sfail "$p" "can't be read safely (the reader gave no result)"; return; fi
+  T=$(printf '%s\n' "$facts" | sed -n "s/^T$TB//p")  # sed reads all its input (no early exit, no SIGPIPE)
+  if [ "$T" != prt ] && [ "$T" != other ]; then sfail "$p" "can't be read safely (the reader gave no result)"; return; fi
   # Exempt gate file (b): changed, but pull_request_target is its only trigger: only B2 and B3 apply.
-  [ $is_gate = 1 ] && [ "$changed" = 1 ] && printf '%s\n' "$facts" | grep -qx $'T\tprt' && exempt=1
+  [ $is_gate = 1 ] && [ "$changed" = 1 ] && [ "$T" = prt ] && exempt=1
   if [ $exempt = 0 ]; then
     while IFS= read -r r; do sfail "$p" "$r"; done < <(printf '%s\n' "$facts" | sed -n "s/^A$TB//p")
     [ $is_gate = 1 ] && sfail "$p" "changed gate.yml has a trigger other than pull_request_target (or its triggers can't be read), so it isn't exempt"
-    if [ "$changed" = 1 ] && line=$(git cat-file blob "$b" | grep -naE "$MG_RE" | head -n 1 | cut -d: -f1) && [ -n "$line" ]; then
-      sfail "$p" "contains the text 'merge-gate' (line $line)"
-    fi
+    [ -n "$line" ] && sfail "$p" "contains the text 'merge-gate' (line $line)"
   fi
   [ "$changed" = 1 ] || return
-  line=$(printf '%s\n' "$facts" | sed -n "s/^W$TB//p" | head -n 1)
-  [ -n "$line" ] && sfail "$p" "grants write access to checks or statuses (line $line)"
-  if ! printf '%s\n' "$facts" | grep -qx 'TP'; then
-    r=$(printf '%s\n' "$facts" | sed -n "s/^NP$TB//p" | head -n 1)
+  r=$(printf '%s\n' "$facts" | sed -n "s/^W$TB//p" | sed -n 1p)
+  [ -n "$r" ] && sfail "$p" "grants write access to checks, statuses, issues, pull-requests, actions or security-events (line $r)"
+  if [ -z "$(printf '%s\n' "$facts" | sed -n '/^TP$/p')" ]; then
+    r=$(printf '%s\n' "$facts" | sed -n "s/^NP$TB//p" | sed -n 1p)
     [ -n "$r" ] && sfail "$p" "leaves the token permissions to the repo default (no workflow-level permissions:, job '$r' has none)"
   fi
 }
+SPOOF_TMP=$(mktemp) || { echo "  FAIL  merge-gate spoofing: could not create a temp file"; echo "gate-check: FAIL"; exit 1; }
+trap 'rm -f "$SPOOF_TMP"' EXIT
 if ! HEAD_C=$(git rev-parse --verify -q "$HEAD_REF^{commit}") || ! TREE=$(git -c core.quotePath=true ls-tree -r --full-tree "$HEAD_C"); then
   sfail "$HEAD_REF" "the head commit's tree can't be listed"
 else

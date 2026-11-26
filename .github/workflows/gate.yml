@@ -52,6 +52,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
           PR: ${{ github.event.pull_request.number }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
@@ -69,10 +70,18 @@ jobs:
           fi
           printf '%s\n' "$base" > "$RUNNER_TEMP/base"
           echo "current base: $base; current labels: $(wc -l < "$RUNNER_TEMP/labels")"
-          # Most recent 'labeled' event for the label (issue events of the PR, server created_at).
-          if events=$(gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
-                --jq '.[] | select(.event == "labeled" and .label.name == "framework-change-approved") | .created_at'); then
-            printf '%s\n' "$events" | sed '/^$/d' | sort | tail -n 1 > "$RUNNER_TEMP/label-time"
+          # Label time (issue events of the PR, server created_at): the most recent 'labeled' event for
+          # the label whose actor is the repository owner AND of type User (task 4c, security F1: a PR
+          # workflow's token labels as a Bot), and only if no 'unlabeled' event (any actor) is at the same
+          # time or later. Otherwise the file stays empty and gate-check FAILs if protected files changed.
+          if events=$(gh api --method GET --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
+                --jq '.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == "framework-change-approved") | "\(.created_at) \(.event) \(.actor.type) \(.actor.login)"'); then
+            printf '%s\n' "$events" | awk -v owner="$OWNER" '
+              NF == 0 { next }
+              NF != 4 { bad = 1; next }
+              $2 == "labeled" && $3 == "User" && $4 == owner { if ($1 "" > lab) lab = $1 "" }
+              $2 == "unlabeled" { if ($1 "" > unl) unl = $1 "" }
+              END { if (!bad && lab != "" && lab > unl) print lab }' > "$RUNNER_TEMP/label-time"
           else
             echo "::warning::could not read the PR's label events"
           fi
