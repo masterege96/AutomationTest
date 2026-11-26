@@ -20,13 +20,16 @@ ok()   { echo "  PASS  $1"; PASS=$((PASS+1)); }
 bad()  { echo "  FAIL  $1"; [ -n "${2:-}" ] && echo "        fix: $2"; FAIL=$((FAIL+1)); }
 skip() { echo "  SKIP  $1"; SKIP=$((SKIP+1)); }
 
-# S19 accepted risk: the person's decision file accepts the two S19 findings (production has no main-only
-# branch policy; SUPABASE_* secrets are repository-level) until a later decision closes it. While the file
-# exists and no file in tasks/decisions/ has the exact line "Closes decision: <file name>" (CR ignored), those
-# findings print RISK instead of FAIL: counted apart, not failures. Decision files are only read as text
-# (grep -F), never executed. A PASS stays a PASS; unreadable answers and a missing Environment still FAIL.
+# S19 accepted risk: the person's decision file accepts exactly what it describes: production has no deployment
+# branch policy (all branches), and the repository-level secrets SUPABASE_ACCESS_TOKEN, SUPABASE_DB_PASSWORD and
+# SUPABASE_PROJECT_ID, until a later decision closes it. While the file exists and no file in tasks/decisions/
+# has the exact line "Closes decision: <file name>" (CR ignored), those two findings print RISK instead of FAIL:
+# counted apart, not failures. Any other non-main policy, or any other repository-level SUPABASE_* secret,
+# still FAILs. Decision files are only read as text (grep -F), never executed. A PASS stays a PASS; unreadable
+# answers and a missing Environment still FAIL.
 S19_DECISION="tasks/decisions/2026-11-25-4d-supabase-secrets-accepted-until-step4.md"
 S19_CLOSE_LINE="Closes decision: ${S19_DECISION##*/}"
+S19_ACCEPTED_SECRETS="SUPABASE_ACCESS_TOKEN SUPABASE_DB_PASSWORD SUPABASE_PROJECT_ID"
 s19_risk_open() {
   [ -f "$S19_DECISION" ] || return 1
   local f
@@ -125,9 +128,9 @@ else
     if echo "$ENV_JSON" | grep -q '"deployment_branch_policy":null' || ! echo "$ENV_JSON" | grep -q '"deployment_branch_policy":'; then
       s19_bad "$POL_NAME" "$POL_FIX (now: all branches)"
     elif echo "$ENV_JSON" | grep -q '"protected_branches":true'; then
-      s19_bad "$POL_NAME" "$POL_FIX (now: protected branches)"
+      bad "$POL_NAME" "$POL_FIX (now: protected branches)"
     elif ! echo "$ENV_JSON" | grep -q '"custom_branch_policies":true'; then
-      s19_bad "$POL_NAME" "$POL_FIX"
+      bad "$POL_NAME" "$POL_FIX"
     elif ! gh_get "repos/{owner}/{repo}/environments/production/deployment-branch-policies?per_page=100"; then
       bad "$POL_NAME $(unreadable)" "$POL_FIX"
     else
@@ -137,7 +140,7 @@ else
       if [ "$POL_COUNT" = 1 ] && echo "$POL_JSON" | grep -q '"name":"main"' && echo "$POL_JSON" | grep -q '"type":"branch"'; then
         ok "$POL_NAME"
       else
-        s19_bad "$POL_NAME" "$POL_FIX (now: $POL_COUNT rule(s), not exactly the branch main)"
+        bad "$POL_NAME" "$POL_FIX (now: $POL_COUNT rule(s), not exactly the branch main)"
       fi
     fi
   elif [ "$ENV_RC" != 0 ] && [ "$GH_CODE" = 404 ]; then
@@ -150,7 +153,13 @@ else
 
   if gh_get "repos/{owner}/{repo}/actions/secrets?per_page=100" --paginate; then
     FOUND=$(printf '%s' "$GH_BODY" | grep -oE '"name":"SUPABASE_[^"]*"' | sed -E 's/^"name":"(.*)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
+    # RISK only if every name found is one of the three the decision names; any other SUPABASE_* secret FAILs.
+    OTHER=""
+    for s in ${FOUND//,/ }; do
+      case " $S19_ACCEPTED_SECRETS " in *" $s "*) ;; *) OTHER="$OTHER $s" ;; esac
+    done
     if [ -z "$FOUND" ]; then ok "$SEC_NAME"
+    elif [ -n "$OTHER" ]; then bad "$SEC_NAME (found: $FOUND)" "move it to the production Environment (Settings > Environments > production > Environment secrets) and delete the repository secret"
     else s19_bad "$SEC_NAME (found: $FOUND)" "move it to the production Environment (Settings > Environments > production > Environment secrets) and delete the repository secret"; fi
   else
     bad "$SEC_NAME $(unreadable)" "gh needs read access to the repository's Actions secrets (names only)"
