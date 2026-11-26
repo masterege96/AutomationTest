@@ -18,6 +18,10 @@ const BASH =
 // Forward slashes: Git Bash accepts C:/... paths; on Linux this is a no-op.
 const script = (name: string) => join(ROOT, "scripts", name).split("\\").join("/");
 
+// Each test spawns Git Bash (several times in some tests); on a busy Windows machine that can exceed Vitest's
+// default 5 s, so the suites get an explicit per-test timeout (as gate-check/verify-fixes tests do).
+const TEST_TIMEOUT = 120_000;
+
 type Run = { code: number | null; stdout: string; stderr: string };
 
 function run(name: "board.sh" | "lessons.sh", cwd: string, args: string[] = []): Run {
@@ -58,7 +62,7 @@ function brief(id: string, title: string, state: string | null, owner = "devops-
 const HEADER = ["| Id | Title | State | Owner |", "|----|-------|-------|-------|"];
 const STATES = ["BACKLOG", "SPEC_READY", "IN_PROGRESS", "IN_REVIEW", "VERIFYING", "DONE", "BLOCKED"];
 
-describe("scripts/board.sh", () => {
+describe("scripts/board.sh", { timeout: TEST_TIMEOUT }, () => {
   it("AC1: prints the Markdown table (id, title, full State cell, full Owner cell), exit 0, no stderr", () => {
     const dir = fixture({
       "tasks/0/TASK_BRIEF.md": brief("0", "Phase 0 bootstrap", "DONE", "git-release, devops-cicd"),
@@ -263,7 +267,7 @@ const ARCHIVE = [
   "",
 ].join("\n");
 
-describe("scripts/lessons.sh", () => {
+describe("scripts/lessons.sh", { timeout: TEST_TIMEOUT }, () => {
   it("AC6/AC7: exactly the open lessons, archive in id order, then per-task in task and <n> order, summary line", () => {
     const dir = fixture({
       "tasks/lessons.md": ARCHIVE,
@@ -445,7 +449,7 @@ function git(args: string[]): Run {
 const BASE = "5c3aa7e";
 const hasBase = git(["cat-file", "-e", `${BASE}^{commit}`]).code === 0;
 
-describe("frozen archives and docs (static, git)", () => {
+describe("frozen archives and docs (static, git)", { timeout: TEST_TIMEOUT }, () => {
   it.skipIf(!hasBase).each([
     ["tasks/lessons.md", "# Lessons", "frozen; new entries go to tasks/<id>/lessons.md"],
     ["tasks/decisions.md", "# Decisions", "frozen; new entries go to tasks/decisions/"],

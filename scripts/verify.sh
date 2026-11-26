@@ -14,6 +14,10 @@
 #   DESTRUCTIVE_APPROVED=1   set by CI when the PR has the `destructive-approved` label
 #   CI=true                  makes skipped required steps fail instead of skip
 #
+# After the build, the client bundle is scanned for server secrets: values from
+# `supabase status -o env` (local stack, read in memory only, never printed), shell-exported
+# secret env vars, and secret-shaped patterns. Local stack values are required in CI.
+#
 # Last line of output is the summary to paste into the task brief.
 
 set -uo pipefail
@@ -122,10 +126,112 @@ if [ -d supabase ]; then
   [ -z "$CRFILES" ] && ok "no CR (Windows) line endings in migrations" \
     || bad "CR line endings in migrations" "$CRFILES"$'\n'"Fix: git add --renormalize . (with .gitattributes eol=lf)"
 
+  # Destructive scan (L15). SQL comments (-- and nested /* */) and whole GRANT/REVOKE statements
+  # (also ALTER DEFAULT PRIVILEGES ... GRANT/REVOKE) are blanked first, so a privilege name such as
+  # TRUNCATE in a grant list, or a word in a comment, isn't a statement. The lexer follows Postgres:
+  # '...' strings ('' inside), E'...' strings (backslash escapes, also across a quote continuation),
+  # "..." identifiers and $tag$...$tag$ dollar quotes (end only at the same tag); comment markers and
+  # ; inside them don't count. Everything else (strings, function bodies) is still scanned.
+  # Fail closed: a privilege statement is exempt only if it has no ' and no $ (GRANT/REVOKE syntax has
+  # neither), and a file whose strings Postgres could read two ways (an odd run of backslashes before a
+  # quote in a plain '...' string: standard_conforming_strings decides) or that ends inside a string,
+  # identifier or comment is scanned line by line with nothing blanked. POSIX awk only (gawk and mawk),
+  # byte-wise (LC_ALL=C). Prints <line number>:<original line> per hit, like grep -n.
+  destructive_hits() {
+    LC_ALL=C awk '
+      function is_destructive(s) {
+        return tolower(s) ~ /(^|[^a-z0-9_])(drop[[:space:]]+(table|column|function|view|schema|type|policy|trigger)|rename[[:space:]]+(to|column)|truncate|delete[[:space:]]+from)([^a-z0-9_]|$)/
+      }
+      function word_start(ch) { return ch ~ /^[A-Za-z_]$/ || ch > "~" }   # bytes >= 128 are letters, as in Postgres
+      function word_cont(ch)  { return word_start(ch) || ch ~ /^[0-9$]$/ }
+      function tag_cont(ch)   { return word_start(ch) || ch ~ /^[0-9]$/ }
+      function semi(ch)       { return ch == ";" ? " " : ch }
+      # state kept across lines: depth (comment nesting), q (open quote: \047 plain, e E-string,
+      # " identifier, $ dollar quote with its tag), cont (1: an E-string just closed, 2: and a newline
+      # followed, so a quote reopens it), unsure (the file cannot be lexed one way only)
+      { orig[NR] = $0
+        line = $0; out = ""; n = length(line); i = 1; inword = 0
+        while (i <= n) {
+          c = substr(line, i, 1); nx = substr(line, i + 1, 1)
+          if (depth > 0) {
+            if (c == "/" && nx == "*") { depth++; out = out "  "; i += 2; continue }
+            if (c == "*" && nx == "/") { depth--; out = out "  "; i += 2; continue }
+            out = out " "; i++; continue
+          }
+          if (q == "$") {
+            if (substr(line, i, length(tag)) == tag) { out = out tag; i += length(tag); q = ""; continue }
+            out = out semi(c); i++; continue
+          }
+          if (q == "e") {
+            if (c == "\\") { out = out c semi(nx); i += 2; continue }
+            if (c == "\047" && nx == "\047") { out = out c nx; i += 2; continue }
+            if (c == "\047") { q = ""; cont = 1 }
+            out = out semi(c); i++; continue
+          }
+          if (q == "\047") {
+            if (c == "\\") {
+              j = i; while (substr(line, j, 1) == "\\") j++
+              if ((j - i) % 2 == 1 && substr(line, j, 1) == "\047") unsure = 1
+              out = out substr(line, i, j - i); i = j; continue
+            }
+            if (c == "\047") q = ""
+            out = out semi(c); i++; continue
+          }
+          if (q == "\"") {
+            if (c == "\"") q = ""
+            out = out semi(c); i++; continue
+          }
+          if (c == "-" && nx == "-") {          # line comment: ends at the newline (or a CR, as in Postgres)
+            k = index(substr(line, i), "\r")
+            if (k == 0) break
+            i += k - 1; continue
+          }
+          if (cont) {
+            if (c == "\r") cont = 2
+            if (c == "\047" && cont == 2) { q = "e"; cont = 0; out = out c; i++; continue }
+            if (!(c == " " || c == "\t" || c == "\f" || c == "\r" || (c == "\v" && cont == 2))) cont = 0
+          }
+          if (c == "/" && nx == "*") { depth = 1; cont = 0; inword = 0; out = out "  "; i += 2; continue }
+          if (c == "\047" || c == "\"") { q = c; inword = 0; out = out c; i++; continue }
+          if (!inword && (c == "e" || c == "E") && nx == "\047") { q = "e"; out = out c nx; i += 2; continue }
+          if (c == "$" && !inword) {
+            j = i + 1
+            if (word_start(substr(line, j, 1))) { j++; while (tag_cont(substr(line, j, 1))) j++ }
+            if (substr(line, j, 1) == "$") { tag = substr(line, i, j - i + 1); q = "$"; out = out tag; i = j + 1; continue }
+            out = out c; i++; continue           # a parameter such as $1, not a quote
+          }
+          inword = (inword ? word_cont(c) : word_start(c))
+          out = out c; i++
+        }
+        if (cont == 1) cont = 2
+        text = (NR == 1 ? out : text "\n" out)
+      }
+      END {
+        if (q != "" || depth > 0) unsure = 1
+        if (unsure) {
+          for (k = 1; k <= NR; k++) if (is_destructive(orig[k])) print k ":" orig[k]
+          exit
+        }
+        ns = split(text, st, ";"); res = ""
+        for (s = 1; s <= ns; s++) {
+          t = st[s]
+          if (index(t, "\047") == 0 && index(t, "$") == 0 &&
+              tolower(t) ~ /^[[:space:]]*(grant|revoke|alter[[:space:]]+default[[:space:]]+privileges)([^a-z0-9_]|$)/) {
+            nl = split(t, parts, "\n"); t = ""
+            for (k = 2; k <= nl; k++) t = t "\n"
+          }
+          res = (s == 1 ? t : res ";" t)
+        }
+        nl = split(res, lines, "\n")
+        for (k = 1; k <= nl; k++)
+          if (is_destructive(lines[k])) print k ":" orig[k]
+      }' "$1"
+  }
+
   DESTRUCTIVE=""
   for m in $NEW_MIGS; do
     [ -f "$m" ] || continue
-    hits=$(grep -niE '\b(drop[[:space:]]+(table|column|function|view|schema|type|policy|trigger)|rename[[:space:]]+(to|column)|truncate|delete[[:space:]]+from)\b' "$m" || true)
+    hits=$(destructive_hits "$m" || true)
     [ -n "$hits" ] && DESTRUCTIVE="$DESTRUCTIVE$m:"$'\n'"$hits"$'\n'
   done
   if [ -z "$DESTRUCTIVE" ]; then ok "no destructive statements in new migrations"
@@ -178,17 +284,7 @@ CLIENT_LEAK=$(grep -rlE 'SUPABASE_SERVICE_ROLE_KEY|service_role' --include='*.ts
   | grep -vE 'node_modules|/\.next/|/tests?/|\.test\.|\.spec\.' | xargs -r grep -lE "^['\"]use client['\"]" 2>/dev/null || true)
 [ -z "$CLIENT_LEAK" ] && ok "no service-role key referenced in client components" \
   || bad "service-role key referenced in client components" "$CLIENT_LEAK"
-
-if [ -d .next/static ] || [ -d dist ] || [ -d build ]; then
-  BUNDLE_DIRS=$(ls -d .next/static dist build 2>/dev/null)
-  LEAK=""
-  for v in SUPABASE_SERVICE_ROLE_KEY STRIPE_SECRET_KEY OPENAI_API_KEY ANTHROPIC_API_KEY DATABASE_URL; do
-    val="${!v:-}"
-    [ -n "$val" ] && [ ${#val} -ge 16 ] && grep -rqF "$val" $BUNDLE_DIRS 2>/dev/null && LEAK="$LEAK$v "
-  done
-  grep -rqE 'sk_live_|sk_test_' $BUNDLE_DIRS 2>/dev/null && LEAK="${LEAK}stripe-secret-pattern "
-  [ -z "$LEAK" ] && ok "client bundle has no server secrets" || bad "server secrets in client bundle: $LEAK" "Only NEXT_PUBLIC_* values may reach the client."
-fi
+# The client-bundle scan runs in [project], right after the build (L27).
 
 # ---------- 4. Code safety lint ----------
 echo "[code safety]"
@@ -240,18 +336,138 @@ if [ -f package.json ]; then
   [ -f yarn.lock ] && PM=yarn
   [ -f bun.lockb ] && PM=bun
   has_script() { node -e "process.exit(require('./package.json').scripts?.['$1']?0:1)" 2>/dev/null; }
-  run_script() {   # name, required(yes/no)
+  run_script() {   # name, required(yes/no); sets RUN_OK=1 only when the script ran and exited 0
+    RUN_OK=0
     if has_script "$1"; then
-      if $PM run "$1" >/tmp/verify-"$1".log 2>&1; then ok "$PM run $1"
+      if $PM run "$1" >/tmp/verify-"$1".log 2>&1; then ok "$PM run $1"; RUN_OK=1
       else bad "$PM run $1" "$(tail -20 /tmp/verify-"$1".log)"; fi
     elif [ "$2" = yes ]; then bad "script '$1' missing from package.json" "Add it. verify.sh needs a deterministic $1 command."
     else skip "$1 (no script)"; fi
   }
   run_script typecheck yes
   run_script lint yes
+
+  # L5: an empty suite must not pass once tests exist.
+  TEST_SCRIPT=$(node -e "process.stdout.write(String(require('./package.json').scripts?.test||''))" 2>/dev/null || true)
+  if [ -n "$TEST_SCRIPT" ]; then
+    # The flag counts in scripts.test (camelCase or the kebab-case CLI form) and as passWithNoTests: true
+    # in a root vitest.config.* (comment lines ignored). PWNT_FIX collects one fix line per place.
+    PWNT_FIX=""
+    printf '%s' "$TEST_SCRIPT" | grep -q -- '--passWithNoTests' \
+      && PWNT_FIX="Remove --passWithNoTests from package.json#scripts.test (tasks/lessons.md L5)."
+    printf '%s' "$TEST_SCRIPT" | grep -q -- '--pass-with-no-tests' \
+      && PWNT_FIX="$PWNT_FIX${PWNT_FIX:+$'\n'}Remove --pass-with-no-tests from package.json#scripts.test (tasks/lessons.md L5)."
+    for vc in vitest.config.*; do
+      [ -f "$vc" ] || continue
+      grep -vE '^[[:space:]]*(//|/\*|\*)' "$vc" 2>/dev/null | grep -qE "passWithNoTests[\"']?[[:space:]]*:[[:space:]]*true" \
+        && PWNT_FIX="$PWNT_FIX${PWNT_FIX:+$'\n'}Remove passWithNoTests: true from $vc (tasks/lessons.md L5)."
+    done
+    if [ -n "$PWNT_FIX" ]; then
+      TEST_FILES=$(find . \( -name node_modules -o -name .next -o -name .git -o -path ./tests/e2e \) -prune -o \
+        -type f -print 2>/dev/null | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$' | sed 's#^\./##' | sort | head -5)
+      if [ -n "$TEST_FILES" ]; then
+        bad "test script has --passWithNoTests while test files exist" "$TEST_FILES"$'\n'"$PWNT_FIX"
+      else ok "test script may use --passWithNoTests (no test files yet)"; fi
+    else ok "test script has no --passWithNoTests"; fi
+  fi
+
   run_script test yes
   run_script test:e2e no
+
+  # Client-bundle secret scan (L27): only a bundle written by this build counts. Files count when the
+  # bundle dirs held no files before the build, or the file list changed, or a file is newer than a
+  # marker taken just before the build (copies can keep an old mtime, so mtime alone isn't enough).
+  bundle_list() { find .next/static dist build -type f 2>/dev/null | sort; }
+  PRE_BUNDLE=$(bundle_list)
+  BUILD_MARK=$(mktemp "${TMPDIR:-/tmp}/verify-build-mark.XXXXXX")
+  touch -d '2 seconds ago' "$BUILD_MARK" 2>/dev/null || true
   run_script build yes
+  BUNDLE_DIRS=""; FRESH=""
+  if [ "$RUN_OK" = 1 ]; then
+    for d in .next/static dist build; do [ -d "$d" ] && BUNDLE_DIRS="$BUNDLE_DIRS $d"; done
+    POST_BUNDLE=$(bundle_list)
+    if [ -n "$POST_BUNDLE" ]; then
+      if [ -z "$PRE_BUNDLE" ] || [ "$PRE_BUNDLE" != "$POST_BUNDLE" ]; then FRESH=1
+      else
+        # shellcheck disable=SC2086
+        FRESH=$(find $BUNDLE_DIRS -type f -newer "$BUILD_MARK" 2>/dev/null | head -1)
+      fi
+    fi
+  fi
+  rm -f "$BUILD_MARK"
+  if [ -z "$FRESH" ]; then
+    bad "client bundle scan (no client bundle from this build)" "The build must succeed and write files under .next/static, dist or build."
+  else
+    # Local stack values, read here (never printed, never written). Same CLI lookup as [database].
+    SB_STATUS=""; HAVE_LOCAL=0
+    if command -v supabase >/dev/null 2>&1; then SB_STATUS=$(supabase status -o env 2>/dev/null) || SB_STATUS=""
+    else SB_STATUS=$(npx --no-install supabase status -o env 2>/dev/null) || SB_STATUS=""; fi
+    status_val() { printf '%s\n' "$SB_STATUS" | sed -nE "s/^$1=\"?([^\"]*)\"?[[:space:]]*\$/\1/p" | head -n 1; }
+    [ -n "$(status_val SERVICE_ROLE_KEY)" ] && HAVE_LOCAL=1
+    # bundle_has <fixed string>: true if any bundle file contains it (value goes via stdin, not argv)
+    # shellcheck disable=SC2086
+    bundle_has()   { printf '%s\n' "$1" | grep -rqF -f - $BUNDLE_DIRS 2>/dev/null; }
+    # shellcheck disable=SC2086
+    bundle_files() { printf '%s\n' "$1" | grep -rlF -f - $BUNDLE_DIRS 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
+    LEAK=""; LEAK_DETAIL=""; LOCAL_VALS=""
+    add_leak() { LEAK="$LEAK$1 "; LEAK_DETAIL="$LEAK_DETAIL$1: $2"$'\n'; }
+    for v in SUPABASE_SERVICE_ROLE_KEY STRIPE_SECRET_KEY OPENAI_API_KEY ANTHROPIC_API_KEY DATABASE_URL; do
+      val="${!v:-}"
+      [ -n "$val" ] && [ ${#val} -ge 16 ] && bundle_has "$val" && add_leak "$v" "$(bundle_files "$val")"
+    done
+    # Server-only values from the local stack. ANON_KEY, PUBLISHABLE_KEY and the URLs are public by design.
+    for v in SERVICE_ROLE_KEY SECRET_KEY JWT_SECRET DB_URL S3_PROTOCOL_ACCESS_KEY_SECRET; do
+      val=$(status_val "$v")
+      [ ${#val} -ge 8 ] || continue
+      LOCAL_VALS="$LOCAL_VALS$val"$'\n'
+      bundle_has "$val" && add_leak "$v" "$(bundle_files "$val")"
+    done
+    # shellcheck disable=SC2086
+    grep -rqE 'sk_live_|sk_test_' $BUNDLE_DIRS 2>/dev/null \
+      && add_leak stripe-secret-pattern "$(grep -rlE 'sk_live_|sk_test_' $BUNDLE_DIRS 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+    # Pattern hits that equal a local value are already reported under that value's name.
+    # The token goes to grep via stdin (-f -), the local values via a process substitution: neither is on argv.
+    is_local() { [ -n "$LOCAL_VALS" ] && printf '%s\n' "$1" | grep -qxF -f - <(printf '%s' "$LOCAL_VALS"); }
+    SB_RE='sb_secret_[A-Za-z0-9_-]{20,}'
+    # shellcheck disable=SC2086
+    SB_HITS=$(LC_ALL=C grep -rahoE "$SB_RE" $BUNDLE_DIRS 2>/dev/null | sort -u)
+    SB_FILES=""
+    while IFS= read -r tok; do
+      [ -n "$tok" ] && ! is_local "$tok" && SB_FILES="$SB_FILES $(bundle_files "$tok")"
+    done <<EOF
+$SB_HITS
+EOF
+    [ -n "$SB_FILES" ] && add_leak sb-secret-key-pattern "$(printf '%s\n' $SB_FILES | sort -u | tr '\n' ' ' | sed 's/ $//')"
+    # JWTs whose payload says "role":"service_role" (any signing key).
+    JWT_RE='eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+    # shellcheck disable=SC2086
+    JWT_HITS=$(LC_ALL=C grep -rahoE "$JWT_RE" $BUNDLE_DIRS 2>/dev/null | sort -u)
+    JWT_FILES=""
+    while IFS= read -r tok; do
+      [ -n "$tok" ] || continue
+      is_local "$tok" && continue
+      p=$(printf '%s' "$tok" | cut -d. -f2 | tr '_-' '/+')
+      case $(( ${#p} % 4 )) in 2) p="$p==" ;; 3) p="$p=" ;; esac
+      printf '%s' "$p" | base64 -d 2>/dev/null | tr -d '[:space:]' | grep -q '"role":"service_role"' \
+        && JWT_FILES="$JWT_FILES $(bundle_files "$tok")"
+    done <<EOF
+$JWT_HITS
+EOF
+    [ -n "$JWT_FILES" ] && add_leak service-role-jwt-pattern "$(printf '%s\n' $JWT_FILES | sort -u | tr '\n' ' ' | sed 's/ $//')"
+    unset SB_STATUS LOCAL_VALS SB_HITS JWT_HITS val tok p
+
+    if [ "$HAVE_LOCAL" = 0 ] && [ "$IN_CI" = 0 ]; then
+      echo "  (local stack not running: client bundle checked for secret patterns only)"
+    fi
+    if [ -n "$LEAK" ]; then
+      CI_NOTE=""; [ "$HAVE_LOCAL" = 0 ] && [ "$IN_CI" = 1 ] && CI_NOTE="local stack values unavailable (required in CI)"$'\n'
+      bad "server secrets in client bundle: ${LEAK% }" "$CI_NOTE$LEAK_DETAIL""Only NEXT_PUBLIC_* values may reach the client."
+    elif [ "$HAVE_LOCAL" = 0 ] && [ "$IN_CI" = 1 ]; then
+      bad "client bundle has no server secrets (local stack values unavailable, required in CI)" "CI starts the local stack before verify.sh; supabase status -o env must report SERVICE_ROLE_KEY."
+    else
+      ok "client bundle has no server secrets"
+    fi
+  fi
 else
   skip "project checks (no package.json)"
 fi
