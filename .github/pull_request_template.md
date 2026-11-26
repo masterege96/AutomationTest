@@ -27,3 +27,5 @@ verify.sh: PASS x/x (0 skipped)
 ## Rollback
 
 <!-- How to undo this change (revert commit, follow-up migration, feature flag). -->
+
+<!-- label check 1 (task 9z, test only) -->
