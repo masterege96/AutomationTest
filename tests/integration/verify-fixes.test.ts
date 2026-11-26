@@ -26,6 +26,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -304,7 +305,12 @@ async function verify(o: VerifyOpts = {}): Promise<VerifyRun> {
     ...(o.committed ?? {}),
   };
   const repo = makeRepo(committed, o.files ?? {});
-  if (o.stale) writeFiles(repo, o.stale);
+  if (o.stale) {
+    // A real stale bundle comes from an earlier build: an hour old, well before verify.sh's (2 s backdated) build marker.
+    writeFiles(repo, o.stale);
+    const old = Date.now() / 1000 - 3600;
+    for (const rel of Object.keys(o.stale)) utimesSync(join(repo, rel), old, old);
+  }
 
   const tmp = tempDir("qa4d-tmp-");
   const env = cleanEnv(tmp, stub + delimiter + (process.env[PATH_KEY] ?? ""), {
