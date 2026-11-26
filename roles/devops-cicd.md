@@ -59,6 +59,7 @@ postcss.config.*
 3. CI reaching a self-hosted DB: allowlist, self-hosted runner or SSH tunnel. Never open the DB to the internet.
 4. Migration user in CI is a dedicated role, not the superuser, where possible.
 5. Every check that can be skipped locally must be required in CI (`CI=true`).
+6. **Next.js upgrades (L25, L26):** at every version change of `next` in `package.json` (major, minor or patch; `eslint-config-next` alone doesn't count), in that upgrade's own commit and PR, run the project's CSP e2e tests (here: `tests/e2e/csp.spec.ts`) and the T1 proxy-bypass header suite (here: `tests/e2e/abuse/row1-admin-and-proxy-bypass.spec.ts`) against a production build, and paste their result lines into the brief's Handoff. The upgrade doesn't merge until security has re-checked the threat model's CSP section and its header/proxy-bypass sections (task 3: sections 6, 3.5, 3.7). A nonce CSP needs per-request rendering (`cacheComponents` / partial prerendering off); the next Next.js major is expected to make those always-on, so that upgrade needs a CSP re-design, not only a re-run (L25).
 
 ## Security baseline rows owned
 #9 (rate limits / CAPTCHA config for self-hosted), #13 (secret scan), headers delivery for #11.

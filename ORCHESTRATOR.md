@@ -71,19 +71,36 @@ GitHub's required review count on `main` is **0**. Approval is the required
 **`merge-gate`** check from `.github/workflows/gate.yml`. It runs on
 `pull_request_target`, so the workflow and `scripts/gate-check.sh` come from `main`;
 the PR's commit is only fetched and read with git, never checked out or executed.
-A PR therefore can't edit the gate that judges it (open residual risks: a PR-defined
-job with the same check name, and `tasks/**`-only changes; see `tasks/lessons.md` L11).
+A PR therefore can't edit the gate that judges it (open residual risk: a PR-defined
+job with the same check name, S14, task 4c; see `tasks/lessons.md` L11).
 It always judges against `main` and fails for any other base. It passes only when, for the task
 named by the branch (`<type>/<id>-<name>`):
 
 - the **first** non-empty line of `specs/<id>/security-gate.md` is `Result: PASS`
 - the **first** non-empty line of `specs/<id>/review.md` is `Result: APPROVE`
-- both files were committed in a later commit than the last code change on the branch,
-  so a review can't approve code that changed afterwards. Any new code commit means both
-  gates run again, each in its own commit. No merge-base with `main` is a FAIL.
-- if the PR changes `.github/workflows/**`, `scripts/**`, `rules/**`, `roles/**` or
-  `ORCHESTRATOR.md`, the PR carries the `framework-change-approved` label. Only the
-  person adds it (AGENT_RULES 18a).
+- both files were committed on the branch after the PR's last **net code change** (what
+  the branch changes compared with `main`), so a review can't approve code that changed
+  afterwards. A clean catch-up merge of `main` doesn't make them stale unless `main` changed a
+  file this PR also changes (then they may be reported stale: fail safe); a conflict
+  resolution or any other edit inside a merge commit that changes code does. Code means
+  every path except the two gate files and `tasks/**`: `specs/<id>/post-deploy.md` doesn't
+  count as code either, while `tasks/decisions/**` and
+  the frozen archive `tasks/decisions.md` do count as code. A PR that changes only `tasks/**` still
+  needs both gate files committed on the branch. Any new code change means both gates
+  run again, each in its own commit. If equality can't be shown the gate is stale (fail
+  safe); no merge-base with `main` is a FAIL.
+- if the PR's net change touches a protected path (`.github/**`, `scripts/**`,
+  `rules/**`, `roles/**`, `templates/**`, `ORCHESTRATOR.md`, `AGENTS.md`,
+  `.gitleaks.toml`, `package.json`, `package-lock.json`, `supabase/config.toml`), the
+  PR carries the `framework-change-approved` label. Only the person adds it
+  (AGENT_RULES 18a). A protected file changed on `main` and brought in by a catch-up
+  merge doesn't count as the PR's change.
+- the label must be applied (GitHub server time) strictly after the last push that
+  changed the PR's net change on protected paths; commit dates are never used. So
+  **the person re-labels after** (a) a force-push, (b) any push that changes a
+  protected file, (c) a catch-up merge where `main` changed a protected file that this
+  PR also changes. A push that changes only non-protected files needs no re-label.
+  When the label time or the push times can't be read, the gate fails (fail closed).
 
 Branch protection on `main`: PR required, 0 approvals, required checks `verify`,
 `db-check`, `secrets`, `merge-gate`, and **"Do not allow bypassing the above settings"
@@ -95,10 +112,12 @@ PR is `CONFLICTING`, GitHub starts no `pull_request` workflow runs, so `verify`,
 does. A label change on such a PR doesn't produce a CI run either. `gh run rerun`
 re-uses the old run's event payload (the old labels), so it can't pick up a new
 label. To re-evaluate, resolve the conflict by merging `main` into the branch (the
-push starts a fresh run). Merge `main` before running the gates, not after: until
-task 4b, a catch-up merge that brings in changes outside `tasks/**` makes the gates
-stale (`tasks/lessons.md` L22). After each merge, git-release checks the other open
-PRs for conflicts.
+push starts a fresh run). Merging `main` before running the gates is recommended only
+for PRs whose code conflicts with `main`: the conflict resolution is a code change, so
+the gates would have to run again. A clean catch-up merge doesn't make the gates stale
+unless `main` changed a file this PR also changes (it can still need a re-label, case (c)
+above). After each merge, git-release checks
+the other open PRs for conflicts.
 
 **security** and **code-reviewer** each run in a fresh agent context, never the
 builder's, and never each other's. They read the repo and the brief, not the builder's

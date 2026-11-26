@@ -48,3 +48,11 @@ open framework PR.
 | **8** Multi-person hardening | GitHub App gate (4c-app) live, least-privilege tokens, secret-rotation and incident runbooks tested once, branch protection checked automatically, a second-reviewer path. | bootstrap-check covers it; one dry run of each runbook recorded. |
 | **9** To-do app release (in parallel, when the person picks a host) | Host, task 3b (Turnstile), release checklist R1-R10, real-user test. | Task 3 DONE. |
 | **10** UI (control panel) | Only after steps 5-9. | — |
+
+## Process change (2026-11-26, the person)
+
+Full suite on GitHub CI only; the PC runs only the tests a change touches, one test job at a time; GitHub's run must
+pass before any merge (decision `tasks/decisions/2026-11-26-4h-full-suite-on-ci-only.md`). **To do in a later PR
+(protected files, the person's label):** update ORCHESTRATOR.md (section 3 IN_REVIEW row, 3a) and the role contracts'
+"verify.sh passes on your branch" wording; add the local test lock / per-run log dir from 4g so a second test job
+cannot start.
