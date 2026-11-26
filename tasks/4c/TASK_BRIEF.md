@@ -483,3 +483,70 @@ duplicate top-level / job-id / job-level keys, a flow-mapping `jobs:` or job) �
   CI (Linux) should be far faster. If 4b's 120 s timeout keeps failing under load, raising it is a test change for qa-test
   (not a weakening); I left it unchanged here, as asked. Security: the AC4 list plus `"\x67ate"` / `"merge-gate"`
   escapes all fail closed; spellings outside the list weren't fuzzed.
+
+### devops-cicd, 2026-11-26 (gate round-1 fixes)
+
+Fixes security round 1 F1 (HIGH), F3, F4 and review B-1, N-1, S-1 in `7092a20`. **AC19 amendment (orchestrator
+records it):** B2 now FAILs a new or changed workflow whose workflow- or job-level `permissions` grant `write` on
+`checks`, `statuses`, `issues`, `pull-requests`, `actions` or `security-events`, or `write-all` (every AC4 spelling
+that applies). `contents: read`, `pull-requests: read`, `id-token: write` alone don't trigger it; `issues: write` now
+**does** (the AC19 sentence "issues: write alone don't trigger it" is replaced). Unchanged-from-main files are not
+affected (B2 is for changed files only), so `drift.yml` (`issues: write`) keeps passing until a PR changes it; such a
+PR would need a decision (allowlist for that file) at that time.
+
+- **F1 (a), gate.yml read step:** new env `OWNER: ${{ github.repository_owner }}`; the events read is now
+  `gh api --method GET --paginate "repos/$REPO/issues/$PR/events?per_page=100" --jq '.[] | select((.event == "labeled"
+  or .event == "unlabeled") and .label.name == "framework-change-approved") | "\(.created_at) \(.event) \(.actor.type)
+  \(.actor.login)"'`, filtered by awk: label time = latest `labeled` with `actor.type == "User"` and
+  `actor.login == $OWNER`, printed only if it is strictly later than every `unlabeled` event for the label (any actor)
+  and every line has 4 fields; otherwise the file stays empty → `  FAIL  framework-change-approved label time could not
+  be read` when protected paths changed. "Label on now" (`FRAMEWORK_CHANGE_APPROVED` from the current labels) is not
+  enough on its own: the existing rule needs that owner label time strictly later than the push time, i.e. an owner
+  `labeled` event after the last protected push. **Field names confirmed** (read-only `gh api --method GET`):
+  `repos/masterege96/AutomationTest/issues/17/events` → `.event` `labeled`, `.created_at` `2026-11-26T14:14:38Z`,
+  `.label.name` `framework-change-approved`, `.actor.login` `masterege96`, `.actor.type` `User`; `repos/...` →
+  `.owner.login` `masterege96`, `.owner.type` `User` (= `github.repository_owner`). A workflow token's events have
+  `actor.type` `Bot` (`github-actions[bot]`). gate-check.sh's interface is unchanged (the filter is in gate.yml).
+- **B-1 / N-1:** `spoof_file` writes the blob once to `$SPOOF_TMP` (`mktemp`, removed by `trap ... EXIT`); the NUL,
+  UTF-8 (`grep -m1 -naxvE`), control/NEL/LS/PS (`grep -m1 -naE`) and B1 (`grep -m1 -naE`) checks read the file and decide
+  on `[ -n "$line" ]` only; awk reads the file (so an early `unsafe()` exit gives its line and reason, not "the reader
+  failed"); the `T`/`TP` facts are read with `sed` (reads all input) instead of `grep -q` pipelines.
+- **S-1 / F4:** header residuals now also list: an earlier push of the same branch posting on the current head;
+  re-runs of gate runs created before a gate change use the old main commit's logic (after merge every open PR needs a
+  fresh gate run; AC29 uses only runs created after merge); `pull_request` runs use the merge ref (safe while main's
+  workflows grant no B2 write); the person's own account. **Orchestrator, after merge:** trigger a fresh gate run on
+  every open PR (new push or label event) and run AC29 only on post-merge runs.
+
+**Changed / new output lines (prefixes unchanged):**
+- B2 reason is now `grants write access to checks, statuses, issues, pull-requests, actions or security-events (line
+  <n>)` (was `grants write access to checks or statuses (line <n>)`): tests matching the old text need updating.
+- A file whose reader stops early now always gets `can't be read safely (line <n>: <why>)`, also for big files.
+- No other line changed.
+
+**Scratch evidence** (one gate-check run at a time, throwaway repo in the OS temp dir, deleted on exit; main = this
+worktree's workflows): AC1 baseline (unchanged `drift.yml` with `issues: write`) PASS exit 0; new/changed `x.yml` with
+`issues: write` (workflow level), `pull-requests: write` (job level), `{ contents: read, actions: write }` (flow),
+`security-events: write` → B2 FAIL exit 1; `id-token: write` → PASS exit 0; ~360-414 KB files (6000 padding comment
+lines) with an invalid byte / a NEL / `# merge-gate` on every padding line → `not valid UTF-8`, `control character or
+YAML 1.1 line break`, `contains the text 'merge-gate'` FAIL (all three were skipped before); ~396 KB file with a tab line
+→ `can't be read safely (line 9: tab outside a block scalar)` (N-1); N-2: `gate.yml` with only a comment added plus
+`checks: write` (still prt-only, exempt (b)) → B2 FAIL for gate.yml. The awk label filter, checked on sample event
+lines: owner User → time; Bot or another user → empty; owner label, later unlabel, then bot label → empty; label and
+unlabel in the same second → empty; owner label after an earlier unlabel → time; a malformed line → empty.
+
+**Cases qa-test must add / update:**
+- F1 actor (static test on gate.yml, plus the awk filter if tested offline): `OWNER: ${{ github.repository_owner }}`
+  in the read step's env; the events jq selects `labeled`/`unlabeled` for the label and prints `.actor.type` and
+  `.actor.login`; the filter requires `"User"` and `$OWNER`. Cases: bot actor (`Bot github-actions[bot]`) → no label
+  time; non-owner `User` → none; owner `User` → its time; unlabel at the same time or later → none. Count of `gh api`
+  calls in the read step stays 4, all `--method GET` (the events call now has an explicit `--method GET`).
+- B2 new scopes: `issues: write`, `pull-requests: write`, `actions: write`, `security-events: write` (block, job level,
+  flow, quoted/case spellings) → FAIL; change the existing AC19 `issues: write` PASS test to expect the B2 FAIL; keep a
+  PASS case with only read scopes (and `id-token: write`); unchanged `drift.yml` stays PASS (AC1).
+- B-1: fixtures of >= 300 KB (several thousand padding comment lines) in a changed workflow, one each: an invalid UTF-8
+  byte on every padding line, a NEL (`\xc2\x85`) on every line, `# merge-gate` on every line → the three FAIL lines.
+- N-2: changed gate.yml (comment-only, still `pull_request_target` only) plus `checks: write` → B2 FAIL for
+  `.github/workflows/gate.yml`.
+- Update any assertion on the old B2 reason text.
+
+**Not run (the person's rule):** test suites, verify.sh. `bash -n scripts/gate-check.sh` OK.
