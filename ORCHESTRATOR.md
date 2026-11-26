@@ -82,10 +82,10 @@ named by the branch (`<type>/<id>-<name>`):
   the branch changes compared with `main`), so a review can't approve code that changed
   afterwards. A clean catch-up merge of `main` doesn't make them stale; a conflict
   resolution or any other edit inside a merge commit that changes code does.
-  `specs/<id>/post-deploy.md` doesn't count as code; `tasks/decisions.md` and
-  `tasks/decisions/**` do count as code. A PR that changes only `tasks/**` still needs
-  both gate files committed on the branch. Any new code change means both gates run
-  again, each in its own commit. If equality can't be shown the gate is stale (fail
+  `specs/<id>/post-deploy.md` doesn't count as code; `tasks/decisions/**` and the frozen
+  archive `tasks/decisions.md` do count as code. A PR that changes only `tasks/**` still
+  needs both gate files committed on the branch. Any new code change means both gates
+  run again, each in its own commit. If equality can't be shown the gate is stale (fail
   safe); no merge-base with `main` is a FAIL.
 - if the PR's net change touches a protected path (`.github/**`, `scripts/**`,
   `rules/**`, `roles/**`, `templates/**`, `ORCHESTRATOR.md`, `AGENTS.md`,
