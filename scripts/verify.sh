@@ -128,13 +128,29 @@ if [ -d supabase ]; then
 
   # Destructive scan (L15). SQL comments (-- and nested /* */) and whole GRANT/REVOKE statements
   # (also ALTER DEFAULT PRIVILEGES ... GRANT/REVOKE) are blanked first, so a privilege name such as
-  # TRUNCATE in a grant list, or a word in a comment, isn't a statement. Comment markers inside
-  # '...' strings or "..." identifiers don't start a comment. Everything else (strings, function
-  # bodies) is still scanned. Prints <line number>:<original line> per hit, like grep -n.
+  # TRUNCATE in a grant list, or a word in a comment, isn't a statement. The lexer follows Postgres:
+  # '...' strings ('' inside), E'...' strings (backslash escapes, also across a quote continuation),
+  # "..." identifiers and $tag$...$tag$ dollar quotes (end only at the same tag); comment markers and
+  # ; inside them don't count. Everything else (strings, function bodies) is still scanned.
+  # Fail closed: a privilege statement is exempt only if it has no ' and no $ (GRANT/REVOKE syntax has
+  # neither), and a file whose strings Postgres could read two ways (an odd run of backslashes before a
+  # quote in a plain '...' string: standard_conforming_strings decides) or that ends inside a string,
+  # identifier or comment is scanned line by line with nothing blanked. POSIX awk only (gawk and mawk),
+  # byte-wise (LC_ALL=C). Prints <line number>:<original line> per hit, like grep -n.
   destructive_hits() {
-    awk '
+    LC_ALL=C awk '
+      function is_destructive(s) {
+        return tolower(s) ~ /(^|[^a-z0-9_])(drop[[:space:]]+(table|column|function|view|schema|type|policy|trigger)|rename[[:space:]]+(to|column)|truncate|delete[[:space:]]+from)([^a-z0-9_]|$)/
+      }
+      function word_start(ch) { return ch ~ /^[A-Za-z_]$/ || ch > "~" }   # bytes >= 128 are letters, as in Postgres
+      function word_cont(ch)  { return word_start(ch) || ch ~ /^[0-9$]$/ }
+      function tag_cont(ch)   { return word_start(ch) || ch ~ /^[0-9]$/ }
+      function semi(ch)       { return ch == ";" ? " " : ch }
+      # state kept across lines: depth (comment nesting), q (open quote: \047 plain, e E-string,
+      # " identifier, $ dollar quote with its tag), cont (1: an E-string just closed, 2: and a newline
+      # followed, so a quote reopens it), unsure (the file cannot be lexed one way only)
       { orig[NR] = $0
-        line = $0; out = ""; n = length(line); i = 1
+        line = $0; out = ""; n = length(line); i = 1; inword = 0
         while (i <= n) {
           c = substr(line, i, 1); nx = substr(line, i + 1, 1)
           if (depth > 0) {
@@ -142,22 +158,65 @@ if [ -d supabase ]; then
             if (c == "*" && nx == "/") { depth--; out = out "  "; i += 2; continue }
             out = out " "; i++; continue
           }
-          if (q != "") {                       # inside a quoted string or identifier
-            if (c == q) q = ""
-            out = out (c == ";" ? " " : c); i++; continue
+          if (q == "$") {
+            if (substr(line, i, length(tag)) == tag) { out = out tag; i += length(tag); q = ""; continue }
+            out = out semi(c); i++; continue
           }
-          if (c == "-" && nx == "-") break      # line comment: drop the rest of the line
-          if (c == "/" && nx == "*") { depth = 1; out = out "  "; i += 2; continue }
-          if (c == "\047" || c == "\"") q = c
+          if (q == "e") {
+            if (c == "\\") { out = out c semi(nx); i += 2; continue }
+            if (c == "\047" && nx == "\047") { out = out c nx; i += 2; continue }
+            if (c == "\047") { q = ""; cont = 1 }
+            out = out semi(c); i++; continue
+          }
+          if (q == "\047") {
+            if (c == "\\") {
+              j = i; while (substr(line, j, 1) == "\\") j++
+              if ((j - i) % 2 == 1 && substr(line, j, 1) == "\047") unsure = 1
+              out = out substr(line, i, j - i); i = j; continue
+            }
+            if (c == "\047") q = ""
+            out = out semi(c); i++; continue
+          }
+          if (q == "\"") {
+            if (c == "\"") q = ""
+            out = out semi(c); i++; continue
+          }
+          if (c == "-" && nx == "-") {          # line comment: ends at the newline (or a CR, as in Postgres)
+            k = index(substr(line, i), "\r")
+            if (k == 0) break
+            i += k - 1; continue
+          }
+          if (cont) {
+            if (c == "\r") cont = 2
+            if (c == "\047" && cont == 2) { q = "e"; cont = 0; out = out c; i++; continue }
+            if (!(c == " " || c == "\t" || c == "\f" || c == "\r" || (c == "\v" && cont == 2))) cont = 0
+          }
+          if (c == "/" && nx == "*") { depth = 1; cont = 0; inword = 0; out = out "  "; i += 2; continue }
+          if (c == "\047" || c == "\"") { q = c; inword = 0; out = out c; i++; continue }
+          if (!inword && (c == "e" || c == "E") && nx == "\047") { q = "e"; out = out c nx; i += 2; continue }
+          if (c == "$" && !inword) {
+            j = i + 1
+            if (word_start(substr(line, j, 1))) { j++; while (tag_cont(substr(line, j, 1))) j++ }
+            if (substr(line, j, 1) == "$") { tag = substr(line, i, j - i + 1); q = "$"; out = out tag; i = j + 1; continue }
+            out = out c; i++; continue           # a parameter such as $1, not a quote
+          }
+          inword = (inword ? word_cont(c) : word_start(c))
           out = out c; i++
         }
+        if (cont == 1) cont = 2
         text = (NR == 1 ? out : text "\n" out)
       }
       END {
+        if (q != "" || depth > 0) unsure = 1
+        if (unsure) {
+          for (k = 1; k <= NR; k++) if (is_destructive(orig[k])) print k ":" orig[k]
+          exit
+        }
         ns = split(text, st, ";"); res = ""
         for (s = 1; s <= ns; s++) {
           t = st[s]
-          if (tolower(t) ~ /^[[:space:]]*(grant|revoke|alter[[:space:]]+default[[:space:]]+privileges)([^a-z0-9_]|$)/) {
+          if (index(t, "\047") == 0 && index(t, "$") == 0 &&
+              tolower(t) ~ /^[[:space:]]*(grant|revoke|alter[[:space:]]+default[[:space:]]+privileges)([^a-z0-9_]|$)/) {
             nl = split(t, parts, "\n"); t = ""
             for (k = 2; k <= nl; k++) t = t "\n"
           }
@@ -165,8 +224,7 @@ if [ -d supabase ]; then
         }
         nl = split(res, lines, "\n")
         for (k = 1; k <= nl; k++)
-          if (tolower(lines[k]) ~ /(^|[^a-z0-9_])(drop[[:space:]]+(table|column|function|view|schema|type|policy|trigger)|rename[[:space:]]+(to|column)|truncate|delete[[:space:]]+from)([^a-z0-9_]|$)/)
-            print k ":" orig[k]
+          if (is_destructive(lines[k])) print k ":" orig[k]
       }' "$1"
   }
 
@@ -292,11 +350,23 @@ if [ -f package.json ]; then
   # L5: an empty suite must not pass once tests exist.
   TEST_SCRIPT=$(node -e "process.stdout.write(String(require('./package.json').scripts?.test||''))" 2>/dev/null || true)
   if [ -n "$TEST_SCRIPT" ]; then
-    if printf '%s' "$TEST_SCRIPT" | grep -q -- '--passWithNoTests'; then
+    # The flag counts in scripts.test (camelCase or the kebab-case CLI form) and as passWithNoTests: true
+    # in a root vitest.config.* (comment lines ignored). PWNT_FIX collects one fix line per place.
+    PWNT_FIX=""
+    printf '%s' "$TEST_SCRIPT" | grep -q -- '--passWithNoTests' \
+      && PWNT_FIX="Remove --passWithNoTests from package.json#scripts.test (tasks/lessons.md L5)."
+    printf '%s' "$TEST_SCRIPT" | grep -q -- '--pass-with-no-tests' \
+      && PWNT_FIX="$PWNT_FIX${PWNT_FIX:+$'\n'}Remove --pass-with-no-tests from package.json#scripts.test (tasks/lessons.md L5)."
+    for vc in vitest.config.*; do
+      [ -f "$vc" ] || continue
+      grep -vE '^[[:space:]]*(//|/\*|\*)' "$vc" 2>/dev/null | grep -qE "passWithNoTests[\"']?[[:space:]]*:[[:space:]]*true" \
+        && PWNT_FIX="$PWNT_FIX${PWNT_FIX:+$'\n'}Remove passWithNoTests: true from $vc (tasks/lessons.md L5)."
+    done
+    if [ -n "$PWNT_FIX" ]; then
       TEST_FILES=$(find . \( -name node_modules -o -name .next -o -name .git -o -path ./tests/e2e \) -prune -o \
         -type f -print 2>/dev/null | grep -E '\.(test|spec)\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$' | sed 's#^\./##' | sort | head -5)
       if [ -n "$TEST_FILES" ]; then
-        bad "test script has --passWithNoTests while test files exist" "$TEST_FILES"$'\n'"Remove --passWithNoTests from package.json#scripts.test (tasks/lessons.md L5)."
+        bad "test script has --passWithNoTests while test files exist" "$TEST_FILES"$'\n'"$PWNT_FIX"
       else ok "test script may use --passWithNoTests (no test files yet)"; fi
     else ok "test script has no --passWithNoTests"; fi
   fi
@@ -356,10 +426,11 @@ if [ -f package.json ]; then
     grep -rqE 'sk_live_|sk_test_' $BUNDLE_DIRS 2>/dev/null \
       && add_leak stripe-secret-pattern "$(grep -rlE 'sk_live_|sk_test_' $BUNDLE_DIRS 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
     # Pattern hits that equal a local value are already reported under that value's name.
-    is_local() { [ -n "$LOCAL_VALS" ] && printf '%s' "$LOCAL_VALS" | grep -qxF -- "$1"; }
+    # The token goes to grep via stdin (-f -), the local values via a process substitution: neither is on argv.
+    is_local() { [ -n "$LOCAL_VALS" ] && printf '%s\n' "$1" | grep -qxF -f - <(printf '%s' "$LOCAL_VALS"); }
     SB_RE='sb_secret_[A-Za-z0-9_-]{20,}'
     # shellcheck disable=SC2086
-    SB_HITS=$(LC_ALL=C grep -rohE "$SB_RE" $BUNDLE_DIRS 2>/dev/null | sort -u)
+    SB_HITS=$(LC_ALL=C grep -rahoE "$SB_RE" $BUNDLE_DIRS 2>/dev/null | sort -u)
     SB_FILES=""
     while IFS= read -r tok; do
       [ -n "$tok" ] && ! is_local "$tok" && SB_FILES="$SB_FILES $(bundle_files "$tok")"
@@ -370,7 +441,7 @@ EOF
     # JWTs whose payload says "role":"service_role" (any signing key).
     JWT_RE='eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
     # shellcheck disable=SC2086
-    JWT_HITS=$(LC_ALL=C grep -rohE "$JWT_RE" $BUNDLE_DIRS 2>/dev/null | sort -u)
+    JWT_HITS=$(LC_ALL=C grep -rahoE "$JWT_RE" $BUNDLE_DIRS 2>/dev/null | sort -u)
     JWT_FILES=""
     while IFS= read -r tok; do
       [ -n "$tok" ] || continue
