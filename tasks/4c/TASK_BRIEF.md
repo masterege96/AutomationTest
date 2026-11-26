@@ -422,3 +422,64 @@ duplicate top-level / job-id / job-level keys, a flow-mapping `jobs:` or job) â†
   until it merges main (its copy counts as changed). Residuals (AC25) are in the gate-check.sh header
   for security to confirm. AC29-AC31 after merge. This PR changes protected paths: the person labels it after the last
   push.
+
+### qa-test, 2026-11-26
+
+- **Changed:** `tests/integration/gate-spoof.test.ts` (new, 163 tests), `tests/integration/gate-check.test.ts` (the two
+  4b static tests that fail by design under AC26: `AC24: the read step only reads ...` now expects 4 `gh api` GETs incl.
+  one paginated `issues/$PR/labels` and one `pulls/$PR` `.base.ref`; `AC24: fail closed ...` now requires the labels/base
+  files to be emptied first, `FRAMEWORK_CHANGE_APPROVED` derived from the API labels with `grep -qxF`, `PR_CURRENT_LABELS`
+  passed, and no `github.event.pull_request.labels` / `labels.*.name` anywhere; every other 4b assertion unchanged).
+  Commit `caab16c`.
+- **Fixtures:** as in 4b (throwaway repos in the OS temp dir, removed in `afterAll`, fixed identities/dates, no network,
+  no token); main = this worktree's `gate.yml`/`ci.yml`/`drift.yml` read at test time (CRLF -> LF) + `app/page.tsx`;
+  branch `ci/9x-demo`, code commit, spoof commit, gates; label current unless stated (push of the head at T1, label T2).
+  Symlinks/submodules are index-only entries (`update-index --cacheinfo`); commits stage only their own paths.
+  **Batching:** a gate-check run costs ~10 s per run plus ~10-15 s per workflow file on this PC under load, so cases
+  with the same expected overall result share one fixture head (one file per case, each test asserts the FAIL line(s)
+  for its own path; the script judges each file on its own). Tests run `describe.concurrent` (Vitest default 5), async
+  child processes, timeout 20 min per test.
+- **Verified:** `npx vitest run tests/integration/gate-spoof.test.ts`: **163 passed** (31m46s wall on the shared PC).
+  `npx vitest run tests/integration/gate-check.test.ts`: **84 passed, 1 failed** = `F1 intermediate differing push (GS2,
+  GS, H)` **timed out** (130 s / 133 s against its 120 s limit, also when run alone); it makes two gate-check runs and the
+  PC ran ~40-60 s per run at the time (one 4c baseline run took 42 s vs 8 s earlier). The 4c change adds no work to 4b
+  fixtures (no `.github` entries), so this is load, the same class as `task-scripts.test.ts > lessons.sh > AC7` (fixed
+  on PR #19 / 4d); not changed here. Both updated 4b static tests pass. `tsc --noEmit` and `eslint` clean on both files.
+  Not run: `verify.sh`, the rest of `npm test` (shared PC).
+- **Script bugs found:** none. Every AC1-AC28 case behaves as the brief and the interface entry say.
+- **AC -> test map** (`gate-spoof.test.ts` unless noted; test names start with the AC):
+  | AC | Tests |
+  |----|-------|
+  | AC1 | `AC1 + AC13 + AC21a: main's unchanged ...`, `AC1: the same baseline without any label input` |
+  | AC2, AC3 | batch `AC2: job id merge-gate` / `gate`, `AC3: job build named merge-gate` / `gate`; `AC2/AC3: S14-A also applies to UNCHANGED workflow files` |
+  | AC4 | `AC4: <spelling> [LF|CRLF|UTF-8 BOM]`, 22 spellings x 3 (adds `"merge-gate"`, `"\x67ate"`); each requires a FAIL line that is not the B1 line |
+  | AC5 | `AC5: name: ${{ matrix.n }} ...`, `AC5: name: build-${{ github.run_id }} ...` |
+  | AC6 | `AC6: job id build with a matrix and no name:` (PASS batch), `AC6: job id merge-gate with a matrix` |
+  | AC7 | `AC7:` second document, `...`, tab, tag on name, tag on key, duplicate name:, duplicate jobs:, invalid UTF-8, directive |
+  | AC8 | `AC8: the AC2 job in` x.yaml / X.YML / sub/x.yml (FAIL); .github/x.yml / docs/x.yml / x.yml.txt (PASS) |
+  | AC9 | `AC9: .github/workflows/x.yml committed as a symlink`, `AC9: a symlink / a submodule at .github/workflows`, `.github` symlink |
+  | AC10 | `AC10: working tree checked out at main ...` (also: HEAD, branch, status unchanged), `AC10: clean head, spoof only uncommitted ... and untracked` |
+  | AC11 | `AC11: spoof file with the person's label current`, `AC11 + F2: label rescue with every gate.yml input current` |
+  | AC12 | `AC12: job build with a step 'name: check gate config'` (PASS batch) |
+  | AC13 | `AC1 + AC13 + AC21a` (no FAIL line for gate.yml) |
+  | AC14 | `AC14: a copy of main's gate.yml added as gate2.yml`, `AC14: gate.yml renamed to merge.yml` |
+  | AC15 | `AC15: changed gate.yml that also triggers on` pull_request / push / workflow_dispatch / flow list; `... NO label`; `... anchor (on: &t)` |
+  | AC16 | `AC16: ... comment line, no label` (4b no-label FAIL lists gate.yml), `AC16: ... with the label current -> PASS` |
+  | AC17 | `AC17: main changed gate.yml after the branch was cut` |
+  | AC18 | `AC18 (B1): merge-gate in` step name / run: status post / action input / env value / comment (line number checked, B1 the only line) |
+  | AC19 | `AC19 (B2): permissions` checks: write, statuses: write, write-all, WRITE-ALL, "write-all", 'write', Statuses: WRITE, flow, job-level, job-level flow, quoted key; `AC19 (B2): contents: read, pull-requests: read, issues: write` (PASS batch) |
+  | AC20 | `AC20 (B3): ... the only job has none`, `... job b has none`; PASS batch: `{}`, `read-all`, every job has its own |
+  | AC21 | `AC1 + AC13 + AC21a` (unchanged ci.yml), `AC21: ci.yml changed only by an extra comment line` (B1 on its line 3) |
+  | AC22 | static `AC22: still pull_request_target only ...`; gate-check.test.ts `AC23: triggers on pull_request_target with all six types` |
+  | AC23 | static `AC23: the current base comes from GET .../pulls/$PR .base.ref ...`, `AC26/AC23: ... only GET calls`; fixtures `AC23: PR_CURRENT_BASE=main`, `... side / empty / two lines / Main / trailing space -> FAIL`, `AC23/AC28: PR_CURRENT_BASE unset` |
+  | AC24 | `AC24: ... always-pass version that also triggers on pull_request`, `AC24: always-pass gate.yml with pull_request_target only, no label` |
+  | AC25 | static `AC25/AC32: gate-check.sh header describes the spoof rules and the residuals` (wording is security's call) |
+  | AC26 | static `AC26: current labels come from GET .../issues/$PR/labels, all pages`, `AC26: no expression ... reads github.event.pull_request.labels`, `AC26: the Gate step still gets no token`; gate-check.test.ts both updated `AC24` tests; fixtures `F2: PR_CURRENT_LABELS with` (CRLF/blank lines, paginated 150) |
+  | AC27 | static `AC27: a failed labels read fails the job ...`, `AC27/AC32: nothing softens the read or the gate` |
+  | AC28 | gate-check.test.ts (4b fixtures unchanged: 84/85 pass, the one failure is the timeout above); `F2 (AC29 offline): PR_CURRENT_LABELS` empty / other / paginated without / near misses; `F2: ... FRAMEWORK_CHANGE_APPROVED=0`; `F2: ... only consulted when protected paths changed` |
+  | AC29-AC31 | after merge (orchestrator with the person); AC29 has the offline equivalent above |
+  | AC32 | static `AC32: gate.yml keeps read/none permissions ...`, `AC32: gate-check.sh uses no new tool`; tests offline, temp dir only |
+- **Next role must know:** a full `npm test` now takes 30+ min on this PC for these two files alone while it's loaded;
+  CI (Linux) should be far faster. If 4b's 120 s timeout keeps failing under load, raising it is a test change for qa-test
+  (not a weakening); I left it unchanged here, as asked. Security: the AC4 list plus `"\x67ate"` / `"merge-gate"`
+  escapes all fail closed; spellings outside the list weren't fuzzed.
