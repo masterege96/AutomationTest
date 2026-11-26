@@ -45,20 +45,43 @@ jobs:
       # GitHub server times only (never commit dates, which the pusher sets). Read-only API calls
       # with the workflow's own token; no PR code runs here. A failed or empty read leaves the file
       # empty, and gate-check then FAILs whenever protected files changed (fail closed).
+      # Task 4c (F2 / retarget): this step also reads the PR's current labels and base branch, never
+      # from the event payload (a re-run re-uses it). Either read failing fails the job here (Q4), so
+      # Gate never runs on it. (Step name kept from 4b.)
       - name: Read label time and push times (GitHub API, read only)
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
           PR: ${{ github.event.pull_request.number }}
           BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          : > "$RUNNER_TEMP/label-time"; : > "$RUNNER_TEMP/pushes"
-          # Most recent 'labeled' event for the label (issue events of the PR, server created_at).
-          if events=$(gh api --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
-                --jq '.[] | select(.event == "labeled" and .label.name == "framework-change-approved") | .created_at'); then
-            printf '%s\n' "$events" | sed '/^$/d' | sort | tail -n 1 > "$RUNNER_TEMP/label-time"
+          : > "$RUNNER_TEMP/label-time"; : > "$RUNNER_TEMP/pushes"; : > "$RUNNER_TEMP/labels"; : > "$RUNNER_TEMP/base"
+          # The PR's labels as they are now, all pages.
+          if ! labels=$(gh api --method GET --paginate "repos/$REPO/issues/$PR/labels?per_page=100" --jq '.[].name'); then
+            echo "::error::could not read the PR's current labels (GitHub API); the gate fails closed, re-run the job"; exit 1
+          fi
+          printf '%s\n' "$labels" | sed '/^$/d' > "$RUNNER_TEMP/labels"
+          # The PR's base branch as it is now (a retarget changes it; the payload of an old run doesn't).
+          if ! base=$(gh api --method GET "repos/$REPO/pulls/$PR" --jq '.base.ref') || [ -z "$base" ]; then
+            echo "::error::could not read the PR's current base branch (GitHub API); the gate fails closed, re-run the job"; exit 1
+          fi
+          printf '%s\n' "$base" > "$RUNNER_TEMP/base"
+          echo "current base: $base; current labels: $(wc -l < "$RUNNER_TEMP/labels")"
+          # Label time (issue events of the PR, server created_at): the most recent 'labeled' event for
+          # the label whose actor is the repository owner AND of type User (task 4c, security F1: a PR
+          # workflow's token labels as a Bot), and only if no 'unlabeled' event (any actor) is at the same
+          # time or later. Otherwise the file stays empty and gate-check FAILs if protected files changed.
+          if events=$(gh api --method GET --paginate "repos/$REPO/issues/$PR/events?per_page=100" \
+                --jq '.[] | select((.event == "labeled" or .event == "unlabeled") and .label.name == "framework-change-approved") | "\(.created_at) \(.event) \(.actor.type) \(.actor.login)"'); then
+            printf '%s\n' "$events" | awk -v owner="$OWNER" '
+              NF == 0 { next }
+              NF != 4 { bad = 1; next }
+              $2 == "labeled" && $3 == "User" && $4 == owner { if ($1 "" > lab) lab = $1 "" }
+              $2 == "unlabeled" { if ($1 "" > unl) unl = $1 "" }
+              END { if (!bad && lab != "" && lab > unl) print lab }' > "$RUNNER_TEMP/label-time"
           else
             echo "::warning::could not read the PR's label events"
           fi
@@ -84,9 +107,11 @@ jobs:
         env:
           BRANCH: ${{ github.event.pull_request.head.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          FRAMEWORK_CHANGE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'framework-change-approved') && '1' || '0' }}
         # Always judged against main, never against the PR's (changeable) base branch.
-        # The token is not passed to this step.
+        # The token is not passed to this step. "Label on now" comes from the labels read above.
         run: |
+          labels="$(cat "$RUNNER_TEMP/labels")"
+          approved=0; printf '%s\n' "$labels" | grep -qxF framework-change-approved && approved=1
+          FRAMEWORK_CHANGE_APPROVED="$approved" PR_CURRENT_LABELS="$labels" PR_CURRENT_BASE="$(cat "$RUNNER_TEMP/base")" \
           FRAMEWORK_LABEL_TIME="$(cat "$RUNNER_TEMP/label-time")" PR_HEAD_PUSHES="$(cat "$RUNNER_TEMP/pushes")" \
             bash scripts/gate-check.sh --base origin/main --head "$HEAD_SHA" --branch "$BRANCH"

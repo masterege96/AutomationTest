@@ -925,11 +925,15 @@ describe("gate.yml static checks (task 4b AC23, AC24)", () => {
     expect(all.indexOf(withToken[0])).toBeLessThan(all.indexOf(gate as Step));
   });
 
+  // Task 4c (AC26, AC23) updated this test: the read step also GETs the PR's current labels (all pages) and its
+  // current base, so it makes 4 gh api calls (label events, activity, current labels, base).
   it("AC24: the read step only reads (gh api GET), from server times (labeled created_at, activity timestamp/after)", () => {
     const read = all.find((s) => /github\.token/.test(s.text));
     expect(read).toBeDefined();
     const cmds = commands(read?.text ?? "").filter((c) => /\bgh\s+api\b/.test(c));
-    expect(cmds.length).toBe(2);
+    expect(cmds.length).toBe(4);
+    expect(cmds.filter((c) => /issues\/\$PR\/labels/.test(c) && /--paginate/.test(c))).toHaveLength(1);
+    expect(cmds.filter((c) => /pulls\/\$PR"/.test(c) && /\.base\.ref/.test(c))).toHaveLength(1);
     for (const c of cmds) {
       expect(c).not.toMatch(/(--method|-X)\s+(POST|PUT|PATCH|DELETE)/i);
       // gh api switches to POST when fields are passed, unless --method GET is explicit.
@@ -952,9 +956,15 @@ describe("gate.yml static checks (task 4b AC23, AC24)", () => {
     const gate = all.find((s) => /scripts\/gate-check\.sh/.test(s.text));
     expect(gate?.text).toMatch(/FRAMEWORK_LABEL_TIME="\$\(cat "\$RUNNER_TEMP\/label-time"\)"/);
     expect(gate?.text).toMatch(/PR_HEAD_PUSHES="\$\(cat "\$RUNNER_TEMP\/pushes"\)"/);
-    expect(gate?.text).toMatch(
-      /FRAMEWORK_CHANGE_APPROVED:\s*\$\{\{\s*contains\(github\.event\.pull_request\.labels\.\*\.name, 'framework-change-approved'\) && '1' \|\| '0'\s*\}\}/,
-    );
+    // Task 4c (AC26) updated this assertion: "label on now" comes from the current labels the read step got from
+    // the API (emptied first), never from the event payload (a re-run re-uses it).
+    expect(read?.text).toMatch(/: > "\$RUNNER_TEMP\/labels"; : > "\$RUNNER_TEMP\/base"/);
+    expect(gate?.text).toMatch(/labels="\$\(cat "\$RUNNER_TEMP\/labels"\)"/);
+    expect(gate?.text).toMatch(/approved=0; printf '%s\\n' "\$labels" \| grep -qxF framework-change-approved && approved=1/);
+    expect(gate?.text).toMatch(/FRAMEWORK_CHANGE_APPROVED="\$approved"/);
+    expect(gate?.text).toMatch(/PR_CURRENT_LABELS="\$labels"/);
+    expect(GATE_YML).not.toMatch(/github\.event\.pull_request\.labels/);
+    expect(GATE_YML).not.toMatch(/labels\.\*\.name/);
     expect(gate?.text).not.toMatch(/\|\|\s*true|;\s*true\b|exit 0|set \+e/);
     expect(gate?.text).not.toMatch(/^\s+if:/m);
     expect(GATE_YML).not.toMatch(/continue-on-error/);

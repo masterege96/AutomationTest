@@ -25,6 +25,17 @@ Order: (a) first, because it removes the merge conflicts that made every later P
 | **4h** role-contract lessons | L14, L20, L21, L25, L26, S20/S21 | db-architect: explicit grants + pgTAP grant test for every exposed object (L14); `; reset role` pattern in schema/threat-model templates (L20); security threat-model template: per-IP auth limits proven by static config + production check, not a local live test (L21), burst caveat from task 3; devops-cicd upgrade rule: re-run CSP and T1 suites and security re-check at every Next.js upgrade (L25, L26); git-release "Owns ... branch protection" wording fixed (S20/S21). | label (rules/roles text) |
 | **4i** template packaging | step 4 goal | New repo layout `agent-team-framework/` (or a `template` branch): framework files only (ORCHESTRATOR, rules, roles, templates, scripts, workflows, tests of the framework), pilot app stripped; `scripts/bootstrap-new-project.sh` copies it into a new repo and fills PROJECT_CONTEXT placeholders; README with the Phase 0 checklist. | label; **Decision**: separate repo vs template branch |
 
+
+### 4i additions (the person, 2026-11-26 20:00 UTC)
+
+- **Claude Code plugin:** package the framework as a plugin (`.claude-plugin/` with `marketplace.json` and
+  `plugin.json`) for a one-line install.
+- **Roles as skills:** `name` / `description` frontmatter on each role file so roles load as skills (e.g. `/backend-dev`).
+- **Role self-checks:** small self-check scripts next to the roles that use them (e.g. an RLS checker for
+  db-architect), so a role checks its own work before `verify.sh`.
+- **Gate limits:** a "what this can't catch" note on each gate (pattern-based secret scan, SQL lint, destructive scan,
+  spoofing stopgap, etc.).
+
 ## Not in a PR (the person)
 
 - L12/L13 secrets and token scopes (done for the pilot; 4e documents the least-privilege setup).
@@ -43,7 +54,7 @@ open framework PR.
 | Step | Goal | Done when |
 |------|------|-----------|
 | **5** Second app from the template | Bootstrap a fresh project from the 4i template and build one feature end to end with something the pilot lacked (related tables, roles or sharing). | Every place where the rules were to-do-specific or needed the orchestrator's hand-holding is a lesson with a fix. |
-| **6** Orchestration as scripts | The orchestrator's manual glue (routing, merging builder worktrees, conflict handling, the local DB lock from 4g) becomes a role contract plus scripts (e.g. `scripts/next-task.sh`). | A fresh agent drives a task from brief to PR with only the repo; the person only approves. |
+| **6** Orchestration as scripts | The orchestrator's manual glue (routing, merging builder worktrees, conflict handling, the local DB lock from 4g) becomes a role contract plus scripts (e.g. `scripts/next-task.sh`). Includes the decision on agent merge rules / GitHub auto-merge. | A fresh agent drives a task from brief to PR with only the repo; the person only approves. |
 | **7** Metrics | Per task: time, fix loops, which gate caught what, API cost (a small metrics file per task next to `board.sh` / `lessons.sh`). | Honest numbers per feature before any bigger decision. |
 | **8** Multi-person hardening | GitHub App gate (4c-app) live, least-privilege tokens, secret-rotation and incident runbooks tested once, branch protection checked automatically, a second-reviewer path. | bootstrap-check covers it; one dry run of each runbook recorded. |
 | **9** To-do app release (in parallel, when the person picks a host) | Host, task 3b (Turnstile), release checklist R1-R10, real-user test. | Task 3 DONE. |
