@@ -1,0 +1,312 @@
+# Task 4c: merge-gate spoofing stopgap (S14, retarget variant, F2)
+
+| Field | Value |
+|-------|-------|
+| State | SPEC_READY |
+| Owner role | devops-cicd (build: `scripts/gate-check.sh`, `.github/workflows/gate.yml`), qa-test (tests: `tests/integration/**`) |
+| Branch | `ci/4c-gate-spoofing-stopgap` |
+| Worktree | `../wt-4c-devops-cicd` |
+| Depends on | 4b (merged, `26119bc`) |
+
+## Request
+
+Orchestrator, step 4 plan row 4c, the person's decision `tasks/decisions/2026-11-25-4-step4-choices.md` item 1
+("Yes, all five"): ship the **stopgap first**, the GitHub App later (4c-app). The stopgap:
+
+- **S14** (`tasks/lessons.md` L11): gate-check FAILs when any workflow file at the PR head (read from the PR commit
+  with git, never executed) defines a job id or job `name:` equal to `merge-gate` or `gate`, or a step/check that
+  could report a check run named `merge-gate`, except `.github/workflows/gate.yml` as it exists on main (compared
+  with main, so a PR that changes gate.yml itself can't whitelist itself). Cover YAML spellings (quotes, anchors,
+  matrix-generated names, `name: ${{ ... }}` expressions fail closed), multiple documents, nested directories.
+- **Retarget variant** (L11, second S14 variant): an `edited` (retarget) event re-runs the gate, and a previously
+  green run on another base can't be re-used; state what is checkable.
+- **F2** (`specs/4b/security-gate.md`, round 2): gate.yml reads the current labels from the GitHub API
+  (`GET .../issues/{pr}/labels`) in the read step instead of the event payload, failing closed if that read fails;
+  re-running an old `labeled` run after the person removed the label FAILs.
+
+## Goal
+
+A PR whose head contains any workflow that could post a `merge-gate` (or `gate`) check gets a red `merge-gate`
+with a line naming the file and the reason, even when the person's label is on it. The gate decides on the PR's
+current labels and base as GitHub reports them when the run starts, not on a re-used event payload.
+
+## Definitions (used by every AC)
+
+- **Base**: the `--base` ref (`origin/main` in CI, `main` in fixtures). **Head**: the `--head` commit.
+- **Workflow file at the head**: every blob in the head commit's tree under `.github/workflows/` whose name ends in
+  `.yml` or `.yaml` (any case), **including nested directories** (GitHub only runs the top level; scanning the
+  rest too fails closed, see Q3). Read with git from the head commit only; the working tree, the index and
+  untracked files are never read.
+- **Exempt gate file**: `.github/workflows/gate.yml` at the head, when (a) its blob id equals the base's
+  `.github/workflows/gate.yml` blob id, or (b) it differs but its only trigger is `pull_request_target` (so the
+  head's copy can't run for this PR; see Q1). Only that exact path can be exempt; the same content at any other path
+  is checked like every other file.
+- **Changed workflow file**: a workflow file at the head that doesn't exist at the base or whose blob id differs
+  from the base's blob at the same path.
+- **Reserved name**: `merge-gate` or `gate`, compared case-insensitively after trimming whitespace and YAML quotes
+  (Q2).
+- **Spoof rules**: S14-A (job identity) applies to every workflow file at the head except the exempt gate file.
+  S14-B (reporting) applies to every changed workflow file; for an exempt gate file under (b) only S14-B2/B3 apply.
+- **Output** (as in 4b: indented `  PASS  ` / `  FAIL  ` lines, last line `gate-check: PASS` exit 0 or
+  `gate-check: FAIL` exit 1, bad arguments exit 2). New line prefixes the tests match (wording after them is free):
+  - `  FAIL  merge-gate spoofing: <path>: ` + reason (one line per file and reason).
+  - `  PASS  merge-gate spoofing: no workflow at the head can report merge-gate` when no spoof rule fails.
+  The spoof check always runs: it does not depend on the label, on whether the PR's net change touches workflows,
+  or on the other checks' results.
+
+## Acceptance criteria
+
+Fixture setup (qa-test, as in 4b: a throwaway git repo per test in the OS temp dir, no network, no GitHub): `main`
+holds copies of the repo's current `.github/workflows/gate.yml`, `ci.yml` and `drift.yml` plus `app/page.tsx`;
+branch `ci/9x-demo` with one code commit then valid gates (4b fixture). "Spoof file" means a commit (before the
+gates, so the gates stay fresh) adding `.github/workflows/x.yml` with the content named in the AC. Run as
+`bash <worktree>/scripts/gate-check.sh --base main --head <sha> --branch ci/9x-demo`. Unless stated the label is
+current (4b inputs set so the protected-path rule PASSes), so any FAIL comes from the spoof check.
+
+S14-A, job identity:
+
+- [ ] AC1 (baseline, no regression): Given the head's workflow files are main's unchanged `gate.yml`, `ci.yml`,
+  `drift.yml`, Then `  PASS  merge-gate spoofing:` and `gate-check: PASS`, exit 0. (Deleting a workflow is left
+  to 4b's label rule; AC1 asserts only the unchanged case.)
+- [ ] AC2 (job id): Given a spoof file with job id `merge-gate:` (one test) and job id `gate:` (one test), with a
+  `pull_request` trigger and a harmless step, Then `  FAIL  merge-gate spoofing: .github/workflows/x.yml:` and
+  `gate-check: FAIL`, exit 1.
+- [ ] AC3 (job name): Given a spoof file with job id `build` and job `name: merge-gate` (and one test with
+  `name: gate`), Then the AC2 FAIL line, exit 1.
+- [ ] AC4 (spellings, one test each, all FAIL as AC2): job id or job name written as `"merge-gate"`, `'merge-gate'`,
+  `Merge-Gate`, `MERGE-GATE`, `name:   merge-gate   ` (extra spaces), `name: merge-gate # comment`,
+  `"name": merge-gate` (quoted key), `name : merge-gate` (space before the colon), `name: "merge\x2dgate"` and
+  `name: "merge-gate"` (escapes), `name: >-` / `name: |` block scalar with `merge-gate` on the next line,
+  a job id with an anchor `merge-gate: &j` and a second job `<<: *j` (merge key), a job name via alias
+  (`name: *n` with `&n merge-gate` defined elsewhere in the file), a flow mapping `jobs: { merge-gate: {...} }`,
+  a job written as `build: { name: merge-gate, runs-on: ubuntu-24.04, steps: [...] }`, an explicit key
+  `? merge-gate`, and each of the above with CRLF line endings and with a UTF-8 BOM.
+- [ ] AC5 (expressions, fail closed): Given a job `name: ${{ matrix.n }}` with `matrix: { n: [merge-gate] }`, and
+  separately `name: build-${{ github.run_id }}` (harmless value), Then the AC2 FAIL line for both, exit 1: any job
+  name containing `${{` FAILs, whatever it evaluates to.
+- [ ] AC6 (matrix without a name): Given job id `build` with a matrix and no `name:`, Then no spoof FAIL (GitHub
+  names it `build (<values>)`), `gate-check: PASS`, exit 0. Given job id `merge-gate` with a matrix, Then FAIL (AC2).
+- [ ] AC7 (can't read it safely, fail closed): Given a workflow file at the head that the checker can't read with
+  certainty, Then a `  FAIL  merge-gate spoofing: <path>:` line saying it can't be read safely, exit 1. Cases, one
+  test each: a second YAML document (a `---` line after content, and a `...` end marker); tab indentation inside
+  `jobs:`; a YAML tag (`!!str merge-gate`) on a job key or name; duplicate job `name:` keys in one job (`name: ok`
+  then `name: merge-gate`); duplicate `jobs:` keys; a file that isn't valid UTF-8. A false FAIL here is acceptable;
+  a PASS for a file that defines a reserved job is not.
+- [ ] AC8 (where files are found): Given the AC2 job in, one test each, `.github/workflows/x.yaml`,
+  `.github/workflows/X.YML`, `.github/workflows/sub/x.yml` (nested, Q3), Then the AC2 FAIL line naming that path,
+  exit 1. Given the same content in `.github/x.yml`, `docs/x.yml` or `.github/workflows/x.yml.txt`, Then no spoof
+  FAIL (4b's protected-path rule still applies to `.github/**`), exit 0 with the label current.
+- [ ] AC9 (symlinks, fail closed): Given `.github/workflows/x.yml` committed as a symlink (mode 120000), or
+  `.github/workflows` itself a symlink or a submodule at the head, Then a `  FAIL  merge-gate spoofing:` line, exit 1.
+- [ ] AC10 (head only, read with git): Given the fixture's working tree checked out at `main` and `--head` a commit
+  with a spoof file, Then FAIL (AC2). Given a clean head but an uncommitted or untracked spoof file in the working
+  tree, Then no spoof FAIL, exit 0. The checker never writes into, checks out or runs anything from the head.
+- [ ] AC11 (label doesn't help): Given a spoof file and the person's label current for it (4b inputs PASS), Then the
+  AC2 FAIL line and `gate-check: FAIL`, exit 1.
+- [ ] AC12 (other step and job names are fine): Given a changed workflow file (not `x.yml` spoof) whose job is
+  `build` and which has a **step** `name: check gate config` and no `merge-gate` text, Then no spoof FAIL, exit 0.
+
+The exempt gate file (S14 "except gate.yml as on main"):
+
+- [ ] AC13 (unchanged gate.yml exempt): Given only main's unchanged `gate.yml` (job `merge-gate`) and a spoof-free
+  head, Then no `  FAIL  merge-gate spoofing: .github/workflows/gate.yml` line (same fixture as AC1, asserted by name).
+- [ ] AC14 (same content elsewhere): Given a copy of main's `gate.yml` added as `.github/workflows/gate2.yml` (and,
+  separately, `gate.yml` renamed to `.github/workflows/merge.yml`), Then
+  `  FAIL  merge-gate spoofing: .github/workflows/gate2.yml:` (resp. `merge.yml`), exit 1.
+- [ ] AC15 (changed gate.yml can't whitelist itself): Given the head's `gate.yml` changed so that it also triggers on
+  `pull_request` (one test), `push` (one test), `workflow_dispatch` (one test), or its trigger list can't be read
+  with certainty (e.g. triggers given through an anchor/alias), Then
+  `  FAIL  merge-gate spoofing: .github/workflows/gate.yml:`, exit 1, label current or not.
+- [ ] AC16 (changed gate.yml, `pull_request_target` only, Q1 default): Given the head's `gate.yml` differs from
+  main's only in a comment line and still triggers only on `pull_request_target`, Then no spoof FAIL; the 4b
+  protected-path rule decides (FAIL `without the person's 'framework-change-approved' label` when no label, PASS
+  with a current label).
+- [ ] AC17 (main moved on): Given the branch was cut before main changed `gate.yml` (head's copy = main's old
+  version, `pull_request_target` only, PR net change doesn't touch it), Then no spoof FAIL and no label needed,
+  `gate-check: PASS`, exit 0.
+
+S14-B, steps that could report a check or status named `merge-gate` (changed workflow files only):
+
+- [ ] AC18 (B1, the text): Given a changed workflow file that contains `merge-gate` anywhere (case-insensitive:
+  a step `name:`, a `run:` line such as `gh api .../statuses/$SHA -f context=merge-gate`, an action input
+  `name: merge-gate`, an `env:` value, a comment), Then `  FAIL  merge-gate spoofing: <path>:`, exit 1. Not applied
+  to an exempt gate file (it names its own job).
+- [ ] AC19 (B2, write access to checks or statuses): Given a changed workflow file whose `permissions` (workflow or
+  any job level) grants `checks: write`, `statuses: write`, or is `write-all` (each spelling of AC4 that applies:
+  quotes, case, flow mapping), Then `  FAIL  merge-gate spoofing: <path>:`, exit 1. `contents: read`,
+  `pull-requests: read`, `issues: write` alone don't trigger it.
+- [ ] AC20 (B3, token permissions left to the repo default): Given a changed workflow file with no `permissions:`
+  at the workflow level and at least one job without its own `permissions:`, Then
+  `  FAIL  merge-gate spoofing: <path>:`, exit 1 (the repo default may include write access to checks/statuses;
+  fail closed, Q6). Given `permissions: {}` or `permissions: read-all` at the workflow level, Then no B3 FAIL.
+- [ ] AC21 (unchanged files keep working): Given the head's `ci.yml` unchanged from main (it contains the text
+  `merge-gate` in a comment), Then no B1 FAIL (AC1). Given `ci.yml` changed only by an extra comment line elsewhere,
+  Then the B1 FAIL line for `ci.yml` (its existing comment mentions `merge-gate`), exit 1: accepted, the builder
+  removes the word when touching ci.yml (note for devops-cicd).
+
+Retarget variant (what main's gate can check):
+
+- [ ] AC22 (re-run on retarget, static): `.github/workflows/gate.yml` still triggers on `pull_request_target` with
+  types including `opened`, `synchronize`, `reopened`, `labeled`, `unlabeled`, `edited` (4b AC23 unchanged).
+- [ ] AC23 (current base, not the payload): gate.yml reads the PR's current base branch from the GitHub API at run
+  time (read-only, the workflow's own token) and the gate job FAILs unless both that value and the payload's base
+  are `main`; if the read fails, the job FAILs. Static check by qa-test (the read exists, no write call, the Gate
+  step depends on it), plus AC31.
+- [ ] AC24 (a retargeted head that carries another branch's gate): Given a head whose `gate.yml` was replaced by an
+  always-pass version that also triggers on `pull_request` (the version a side branch would carry), Then AC15's
+  FAIL. If that version triggers only on `pull_request_target`, Then 4b's label rule FAILs it without a current label
+  (AC16). Fixture test.
+- [ ] AC25 (documented residual, not testable here): the brief's Handoff and the gate-check.sh header state that a
+  green `merge-gate` produced by **another base branch's** `gate.yml` (PR opened against a side branch, then
+  retargeted to main, then the old run re-run) is not visible to main's gate and stays possible until 4c-app pins
+  the required check to the App. Same for a check run or commit status named `merge-gate` posted onto the PR's head
+  SHA by a workflow on another branch (not at the head). Security confirms the wording.
+
+F2, labels from the API:
+
+- [ ] AC26 (static): gate.yml derives "the `framework-change-approved` label is on the PR now" from the current
+  labels read from the GitHub API in the read step (read-only, the workflow's own token, all pages); no expression
+  in gate.yml reads `github.event.pull_request.labels`. The Gate step still gets no token.
+- [ ] AC27 (fail closed, static): if the labels read fails (API error, unparseable answer), the gate job FAILs and
+  the log names the failed read (Q4 default: the job fails even when the PR changes no protected path).
+- [ ] AC28 (gate-check interface unchanged): `FRAMEWORK_CHANGE_APPROVED`, `FRAMEWORK_LABEL_TIME`, `PR_HEAD_PUSHES`
+  keep their 4b meaning and format; the 4b tests in `tests/integration/gate-check.test.ts` pass unchanged.
+
+After merge (orchestrator with the person, on throwaway PRs that are never merged, closed and their branches
+deleted afterwards; recorded in this brief's Handoff):
+
+- [ ] AC29 (F2 live): label a PR that changes a protected path (green), remove the label (red), re-run the earlier
+  `labeled` run with `gh run rerun` → red with `  FAIL  pipeline/framework files changed without the person's
+  'framework-change-approved' label`.
+- [ ] AC30 (S14 live): a PR adding `.github/workflows/x.yml` with a `pull_request` job named `merge-gate` that only
+  sleeps then succeeds (`permissions: {}`, no secrets): main's `merge-gate` is red with the spoof line. Record what
+  GitHub then reports for the PR (`gh pr view <n> --json mergeStateStatus` and the required-check list) **after the
+  spoof job finished green**: if GitHub counts it as passing, the stopgap only makes the spoof visible and the
+  orchestrator raises 4c-app's priority with the person.
+- [ ] AC31 (retarget live): retarget a PR with a green gate from `main` to a side branch and back: the `edited` run
+  appears each time; while the base isn't `main` the gate is red; re-running an earlier run after the retarget away
+  from `main` is red (AC23).
+
+Done gate:
+
+- [ ] AC32: new tests in `tests/integration/` (Vitest), run in `npm test` on Windows Git Bash and on the CI runner
+  without network or a GitHub token, leave nothing outside the OS temp dir; gate-check.sh's header comment describes
+  the spoof rules and the residuals of AC25; gate.yml keeps 4b AC23/AC24 (permissions `read`/`none` only, SHA-pinned
+  checkout, `persist-credentials: false`, no PR code checked out or run, "Only PRs into main" and head-SHA pin steps);
+  no new tool or dependency (PROJECT_CONTEXT; the YAML check must work with what gate-check already uses on both
+  platforms); `bash scripts/verify.sh` passes; security gate PASS; review APPROVE.
+
+## Security rows that apply
+
+From `rules/security-baseline.md` (security confirms in Design). This is the merge-approval control itself
+(ORCHESTRATOR 3a): a spoofed PASS means unreviewed code can deploy migrations to production.
+
+- [ ] Row 13: no secret or token value in any file, fixture or log; gate.yml uses only `GITHUB_TOKEN` read scopes.
+  abuse test: AC26, AC27, AC32.
+- [ ] Merge-gate bypass (L11 S14 and its retarget variant, F2; not a numbered row): abuse tests AC2-AC11, AC14,
+  AC15, AC18-AC20, AC24, AC29-AC31.
+- Security, please also check: the YAML-reading approach against spellings not listed in AC4/AC7 (fail closed is
+  the requirement, not the list); that B1-B3 close the "step reports a check" path for workflows at the head (token
+  write scopes are the only way a workflow without stored secrets can post a check or status); the AC25 residual
+  wording; the standing step-4 check (no new `SUPABASE_*` secret reads outside `drift.yml`).
+
+## Scope
+
+**Allowed paths** (verify.sh fails the task if anything else changes). `tasks/**` is always allowed.
+
+```
+# devops-cicd (build)
+scripts/gate-check.sh
+.github/workflows/gate.yml
+# qa-test (fixture tests and gate.yml static checks)
+tests/integration/**
+```
+
+**Protected-path note:** this PR changes `scripts/**` and `.github/workflows/**`, so it needs the person's
+`framework-change-approved` label, applied after the last push that changed those files (4b rule; agents never add
+it, AGENT_RULES 18a). gate.yml runs from main (`pull_request_target`), so **this PR is judged by main's current
+(4b) gate**; the spoof rules and the API label/base reads apply only after merge. After merge, open PRs whose head
+`gate.yml` differs from main's still pass the spoof check if it's `pull_request_target`-only (AC17); merging main
+into them is not required for the spoof check.
+
+**Out of scope:**
+
+- The GitHub App (4c-app, later in the step-4 order): an App posts the `merge-gate` check and branch protection pins
+  the required check to it. The person creates the App and stores its private key as a `production`-environment
+  secret, following step-by-step instructions the orchestrator provides when it's time. Not started here.
+- Detecting checks or statuses posted by workflows on **other** branches, and re-runs of runs produced by another
+  base branch's gate.yml (AC25 residual; 4c-app).
+- `ci.yml` (incl. its payload-label read for `destructive-approved`, same F2 pattern; L16), `drift.yml`,
+  `scripts/verify.sh`, branch protection and repo settings (the person's, AGENT_RULES 18a).
+- Updating `ORCHESTRATOR.md` 3a and `tasks/lessons.md` L11 to the new rules (the person's file / orchestrator after
+  merge).
+- Stored secrets other than `GITHUB_TOKEN` in new workflows (a personal token could post checks; Q5).
+
+## Inputs
+
+- `scripts/gate-check.sh`, `.github/workflows/gate.yml`, `.github/workflows/ci.yml`, `.github/workflows/drift.yml`
+  (main at `26119bc`), `ORCHESTRATOR.md` 3a.
+- `tasks/lessons.md` L11 (S14 and the retarget variant); `specs/4b/security-gate.md` F2; `tasks/4b/TASK_BRIEF.md`
+  (fixture conventions, Q1 env interface); `tasks/4/PLAN.md` row 4c; decision `tasks/decisions/2026-11-25-4-step4-choices.md`.
+- Example test: `tests/integration/gate-check.test.ts`.
+- No `specs/4c/schema.md` (no DB). `specs/4c/threat-model.md` from security if the orchestrator asks for one.
+
+## Destructive change?
+
+- [x] No (CI gate logic and tests only; no data, no production)
+- [ ] Yes
+
+## Open questions (defaults apply unless the person says otherwise)
+
+- Q1 (the person): a PR that changes `gate.yml` itself. Default: the changed gate.yml is exempt from S14-A and B1
+  only if `pull_request_target` is its only trigger (its head copy can't run for its own PR), and the 4b label rule
+  still applies. Alternative (literal request): exempt only when the blob equals main's; then no PR can ever change
+  gate.yml again (a changed gate.yml always defines `merge-gate`), which would block 4c-app. Not recommended.
+- Q2: reserved names compared case-insensitively and trimmed. Default: yes (fails closed if GitHub matches check
+  names case-sensitively).
+- Q3: workflow files in nested directories are scanned too. Default: yes (GitHub doesn't run them; scanning costs
+  nothing and doesn't depend on that).
+- Q4: a failed labels or base read fails the whole gate job, even for PRs that change no protected path. Default:
+  yes (literal "fail closed"; a re-run reads the API again). Alternative: treat a failed labels read as "no label",
+  so only PRs that need the label go red.
+- Q5: new or changed workflows that read a stored secret (other than `GITHUB_TOKEN`) could post a check with it.
+  Default: not covered (the repo has no such token secret; the label review covers it; 4c-app closes it).
+- Q6: B3 fails a changed workflow that leaves token permissions to the repo default. Default: yes (all three current
+  workflows set `permissions:` at the workflow level).
+
+## Handoff notes for others
+
+- **The person:** label this PR after its last protected-path push (4b rule). Q1 is the one that matters: the default
+  keeps gate.yml changeable for 4c-app.
+- **Orchestrator:** after merge run AC29-AC31 with the person; if AC30 shows GitHub accepts the spoofed green check,
+  raise 4c-app's priority. Mark S14 "narrowed, residual AC25" in L11, F2 fixed.
+- **devops-cicd:** no YAML parser is listed in PROJECT_CONTEXT; if the check can't be done reliably with the tools
+  gate-check already uses, BLOCKED back with a proposal rather than a weaker rule. The ci.yml comment that mentions
+  `merge-gate` will trip B1 the next time ci.yml changes (AC21).
+- **qa-test:** fixture copies of `gate.yml`/`ci.yml`/`drift.yml` should come from the worktree's current files at test
+  time, so AC1 keeps tracking main.
+
+---
+
+## Handoff (each role appends; never delete earlier entries)
+
+### product-spec, 2026-11-26
+
+- **Changed:** `tasks/4c/TASK_BRIEF.md` (new).
+- **Verified:** read `scripts/gate-check.sh`, `gate.yml`, `ci.yml`, `drift.yml` on main `26119bc`, ORCHESTRATOR 3a,
+  plan row 4c, the step-4 decision, L11, the 4b brief and security gate (F2). No current workflow job uses a reserved
+  name except gate.yml's `merge-gate`; `ci.yml` line 3 mentions `merge-gate` in a comment.
+- **Left to do:** build (devops-cicd), tests (qa-test), security, review; AC29-AC31 after merge.
+- **Next role must know:** the stopgap makes main's real `merge-gate` red; whether GitHub also ignores a same-named
+  green check from a spoof job is GitHub's behaviour, not changed here (AC30 records it). The retarget variant's
+  re-run of another branch's gate run is not checkable by main's gate (AC25); AC22-AC24 are what is.
+
+## Blocked (fill in only when BLOCKED)
+
+- **Missing:**
+- **Who must provide it:**
+
+### orchestrator, 2026-11-26 (inputs)
+
+- Q1-Q6: build with the stated defaults; the person sees them in the PR before adding the label.
+- No YAML parser is in PROJECT_CONTEXT: if a safe check is not possible with git + text tools, set BLOCKED with a proposal (no new dependency without the person).
