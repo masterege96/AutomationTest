@@ -1,5 +1,55 @@
 Result: APPROVE
 
+# Code review: task 4d, round 3 (delta since the round-2 APPROVE)
+
+- **Role:** code-reviewer, 2026-11-26, fresh context, judged from the repo only. Round 3 covers only the delta; round 2
+  (below) approved `fe03f25`. Note: the role caps reviews at 2 rounds (ORCHESTRATOR §4); this round re-checks a test-only
+  fix after an APPROVE, not a third bounce, so the person need not decide anything new.
+- **Branch:** `ci/4d-verify-fixes` at `f5f8265`. Diff reviewed: `git diff fe03f25..HEAD` = `8026081` (test) and
+  `f5f8265` (`tasks/4d/lessons.md` notes). Files: `tests/integration/verify-fixes.test.ts` (+7/-1), `tasks/4d/lessons.md` (+7).
+- **Run by this review:** `npm run lint` clean. Not run (per instructions): verify.sh, builds, e2e, `supabase`, slow tests.
+
+## Delta: `8026081` (stale-bundle fixtures get an mtime an hour in the past)
+
+- **Cause, confirmed from the code.** `scripts/verify.sh:383` backdates the build marker 2 s (`touch -d '2 seconds ago'`)
+  and `:393` counts a bundle as fresh when any file is `-newer` the marker (when the file list is unchanged). The fixture
+  wrote the stale files moments before verify.sh started, so they were within that 2 s window and counted as fresh:
+  AC3 (`build: "none"` + stale) got PASS. Whether it failed depended only on how fast the run was (fast Linux CI vs slow
+  Git Bash on Windows).
+- **Fix is correct and deterministic.** `verify()` now sets atime and mtime of every `o.stale` file to `now - 3600 s` with
+  `utimesSync` (`tests/integration/verify-fixes.test.ts:308-313`). That is far outside the 2 s backdating on both OSes,
+  and the marker is taken later than the fixture, so the order no longer depends on timing. If `touch -d` is unsupported,
+  verify.sh falls back to a marker at "now", which is still an hour newer. Stale files are older than the marker on
+  Linux and Windows alike; `find -type f` ignores directory mtimes, so the parent dirs' fresh mtimes don't matter.
+- **Every `stale` user still tests what its name says:**
+  - AC3 (build writes nothing): list unchanged, stale is old -> FAIL "no client bundle". Now asserted reliably.
+  - AC4 build-fail and build-missing: the `RUN_OK` / missing-script paths never reach the mtime check -> unaffected.
+  - L4d.2 "build rewrites the same files": the stub rewrites them after the marker -> newer -> scanned, PASS. The
+    hour-old stale mtime makes the "new mtime" part real instead of incidental.
+  - L4d.2 "adds a new file with an old mtime": fresh by the changed file list, not mtime -> unaffected.
+- **No assertion weakened or removed.** The only change is fixture setup plus the `utimesSync` import; no `expect`
+  changed, no `.skip`/`.only`. The fix makes the fixture match a real stale bundle (written by an earlier build);
+  `verify.sh` is unchanged, which is right: the script behaved as specified (L4d.2) and the fixture was wrong.
+- **Scope:** test file and `tasks/**` only. No script, workflow, `package.json` or dependency change.
+- **Lessons (`f5f8265`):** accurate. The two edge cases it records (a build that only deletes/renames changes the list
+  without writing; future mtimes or within-2 s stale files count as fresh) are real and narrow, and they stay a follow-up.
+  Real Next.js builds write new chunks. The suggested hardening ("changed list AND at least one file newer than the
+  marker") is sound, but it would fail the L4d.2 "old-mtime copy" case on a clean tree unless that case stays exempt
+  (`PRE_BUNDLE` empty). Keep that in mind when doing it.
+
+## Round-3 findings
+
+1. **tasks/4d/TASK_BRIEF.md (Handoff), nit, owner: qa-test / orchestrator.** No Handoff entry records `8026081` (what
+   changed, what was verified, e.g. the `verify-fixes.test.ts` run and the green CI re-run on PR #19). AGENT_RULES 24
+   asks for one. It is in `lessons.md` and the commit message, so not blocking.
+2. **tests/integration/verify-fixes.test.ts:311, nit, no change needed.** `Date.now() / 1000 - 3600` is fine.
+   Optional: a fixed past date (as the stub's `write-old-mtime` uses, `2020-01-01`) would match the existing style.
+
+No blockers, no should-fix. Round-2 findings and merge notes below still apply unchanged (protected paths: the PR needs
+the person's `framework-change-approved` label after the last push; required checks must be green on `f5f8265`).
+
+---
+
 # Code review: task 4d, round 2 (verify.sh and bootstrap-check fixes: L27, L15, L5, S19)
 
 - **Role:** code-reviewer, 2026-11-26, fresh context, judged from the repo only. Round 2 of max 2.
