@@ -1,5 +1,74 @@
 Result: PASS
 
+# Security gate: task 4d, round 3 (delta since the round-2 PASS)
+
+- **Role:** security (gate, round 3), 2026-11-26. I started with a fresh context and judged only from the repo.
+- **Branch:** `ci/4d-verify-fixes` at `f5f8265`, base `origin/main`. Reviewed: `git diff fe03f25..HEAD`. It holds one
+  code commit, `8026081` (`tests/integration/verify-fixes.test.ts`, +7/-1), and `f5f8265`, which only touches
+  `tasks/4d/lessons.md`. No script, workflow, app code, migration, env var, `package.json` or lockfile changed.
+- I did not run verify.sh, the build, the e2e tests, supabase or the slow test files. This round reads code only.
+
+## R3-1. 8026081 does not weaken any test (PASS)
+
+- The only change is in the `verify()` fixture helper. Stale files (`o.stale`) are still written. Then each one gets
+  `utimesSync(..., now - 3600 s)`, which sets its mtime an hour in the past. No `it(...)` body, assertion,
+  expected line or build mode changed.
+- Each test that uses `stale` is the same as before or stricter:
+  - AC3 (`build: "none"` + stale) and AC4 `missing` (+ stale): before this commit, the stale file could fall inside the
+    2 s marker backdating and count as fresh. That is why the first CI run on Linux failed. Now these tests exercise
+    the real fail-closed path: the file list is unchanged and no file is newer than the marker, so the result is
+    `FAIL no client bundle`.
+  - AC4 `fail` + stale leak: `RUN_OK=0`, so the scan is skipped whatever the mtime is. The test is unaffected.
+  - L4d.2 "rewrites the same files": the build writes with the current mtime, which is newer than the marker. That
+    still holds, and with more margin than before.
+  - L4d.2 "adds a new file with an old mtime": this path depends on the file list changing, not on mtimes. It still
+    FAILs on the leak.
+- No secret-shaped literal was added. The diff holds only an import, a comment and a timestamp expression.
+
+## R3-2. The fresh-build rule still fails closed on Linux (PASS)
+
+Code checked: `scripts/verify.sh:377-400`.
+- `PRE_BUNDLE` is taken, and the marker is made with `touch -d '2 seconds ago'` (GNU touch on Linux). If touch fails
+  (`|| true`), the marker keeps the current time from `mktemp`. That only makes the check stricter.
+- For a real stale bundle and a build that writes nothing:
+  - the file list is unchanged,
+  - `find -newer "$BUILD_MARK"` finds nothing,
+  - so `FRESH` stays empty and the result is `FAIL client bundle scan (no client bundle from this build)`.
+  - If the build fails, `RUN_OK=0` gives the same result, so a stale bundle is never scanned or passed.
+- In CI this case barely comes up. Every job starts from a fresh checkout, and `ci.yml` caches only npm (no `.next`,
+  `dist` or `build` cache). So `PRE_BUNDLE` is empty there, and only files this build wrote can exist.
+
+## R3-3. The two documented edge cases (L4d.3) are follow-ups, not blockers
+
+1. **A build that only deletes or renames stale files.** The file list changes, so `FRESH=1` and the leftover stale
+   files are scanned.
+   - This does not hide a leak: whatever is in those files is still scanned.
+   - The cost is a false "this build's bundle" PASS, and only on a local tree that already has a stale bundle, with a
+     build that writes no bundle files. Real Next.js builds write new chunks.
+2. **Stale files with a future mtime, or one within the 2 s backdating.** These count as fresh.
+   - Same consequence as case 1: stale files get scanned, and nothing is hidden.
+   - It needs clock skew, a restored build cache, or a write in the 2 s before the build. None of these applies to CI
+     as configured now.
+
+Neither case lets a server secret in this build's bundle go unscanned. Both affect only local runs and need an unusual
+build. They stay open in `tasks/4d/lessons.md` L4d.3 for devops-cicd. The suggested hardening there is the right fix:
+also require at least one bundle file newer than the marker. If a future workflow restores `.next` from a cache, this
+becomes relevant to CI, and the hardening should land first.
+
+## R3-4. Standing checks (PASS)
+
+- `secrets.SUPABASE_*` appears only in `.github/workflows/drift.yml`, and no workflow changed in this delta.
+  - `ci.yml:61` names `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY`. They are mapped from local
+    `supabase status` output (public by design), not from repository secrets.
+- No new secret-shaped literal appears anywhere in `fe03f25..HEAD`.
+
+The round-2 findings and notes below still hold. The scripts they describe have not changed since `fe03f25`.
+
+---
+
+# Round 2 report (kept as written)
+
+
 # Security gate: task 4d, round 2 (verify.sh and bootstrap-check fixes: L27, L15, L5, S19)
 
 - **Role:** security (gate, round 2), 2026-11-26, fresh context, judged from the repo only.
