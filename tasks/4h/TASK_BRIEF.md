@@ -273,3 +273,91 @@ then label; any later wording fix needs a re-label.
 ### orchestrator, 2026-11-26 (inputs)
 
 - Q1-Q7: build with the stated defaults; the person sees them in the PR before adding the label.
+
+### orchestrator (draft), 2026-11-26
+
+- **Changed:** `roles/db-architect.md`, `roles/security.md`, `roles/devops-cicd.md`, `roles/git-release.md`,
+  `ORCHESTRATOR.md` (3a), `tasks/4h/lessons.md` (new). Q1-Q7 built on their defaults (no templates, any `next`
+  version change, git-release rule 3 fixed, AC14 (c) precise form, label creation stays with git-release,
+  `service_role` stated and tested without an explicit grant, db-builder.md/qa-test.md unchanged).
+- **AC map (file:line on this branch):**
+  - AC1: `roles/db-architect.md:42` (rule 6). AC2: `roles/db-architect.md:33` (output 9 grant tests), `:34` (output
+    10 Grants), `:56` (Done when). AC3: `roles/db-architect.md:43-47` (rule 7; output 9 at `:33` points to it).
+  - AC4: `roles/security.md:34`. AC5: `grep -n "set local role" roles/*.md` shows only `roles/db-architect.md:44-45` and
+    `roles/security.md:34`, all with the trailing `; reset role`.
+  - AC6: `roles/security.md:35`. AC7: `roles/security.md:36`. AC8: `roles/security.md:37`.
+  - AC9: `roles/devops-cicd.md:62` (rule 6). AC10: `roles/security.md:9` (When it runs).
+  - AC11: `roles/git-release.md:18` (Owns line replaced), `:24` (Never touches); `grep -rn "branch protection" roles/`
+    shows only those two lines (the person sets / agent never changes).
+  - AC12: `ORCHESTRATOR.md:81-89` (third bullet) and `:113-117` (the L22 sentence replaced; merge-first only for
+    conflicting PRs). AC13: `ORCHESTRATOR.md:90-95`. AC14: `ORCHESTRATOR.md:96-101`.
+  - AC15: `ORCHESTRATOR.md:74-75` (residual risk now only S14, task 4c); `roles/git-release.md:51` (rule 3 clause now
+    points to ORCHESTRATOR.md section 3a).
+  - AC16: `tasks/4h/lessons.md`. AC17: `git diff --name-only origin/main...HEAD` lists only the five files plus
+    `tasks/4h/TASK_BRIEF.md` and `tasks/4h/lessons.md`.
+- **Verified:**
+  - `bash scripts/lessons.sh` before (main and this branch before edits): `lessons.sh: 14 open (14 archive, 0 per-task)`;
+    after: `lessons.sh: 9 open (9 archive, 0 per-task)`, exit 0; no `L14 `, `L20 `, `L21 `, `L25 `, `L26 ` line;
+    `L11 ` still listed.
+  - `bash scripts/verify.sh --no-db`: `verify.sh: FAIL 1/16 failed: npm run test:e2e (1 skipped)`. Scope check
+    `PASS all changed files are inside the allowed paths`; typecheck, lint, `npm run test`, build PASS. The e2e
+    failure is environmental: Playwright needs the local stack's env vars (not set in a `--no-db` run). A first run
+    failed `npm run test` (task-scripts AC13: a non-citation mention of `tasks/decisions.md` in 3a); fixed in
+    `3365b68` by calling it "the frozen archive".
+- **Left to do:** full `bash scripts/verify.sh` with the local stack (AC18); security gate and review (fresh
+  contexts); push; the person reads the 3a text below and adds `framework-change-approved` after the last push.
+- **New ORCHESTRATOR.md 3a text (for the PR description, quote in full):**
+
+```markdown
+## 3a. Merge approval
+
+GitHub's required review count on `main` is **0**. Approval is the required
+**`merge-gate`** check from `.github/workflows/gate.yml`. It runs on
+`pull_request_target`, so the workflow and `scripts/gate-check.sh` come from `main`;
+the PR's commit is only fetched and read with git, never checked out or executed.
+A PR therefore can't edit the gate that judges it (open residual risk: a PR-defined
+job with the same check name, S14, task 4c; see `tasks/lessons.md` L11).
+It always judges against `main` and fails for any other base. It passes only when, for the task
+named by the branch (`<type>/<id>-<name>`):
+
+- the **first** non-empty line of `specs/<id>/security-gate.md` is `Result: PASS`
+- the **first** non-empty line of `specs/<id>/review.md` is `Result: APPROVE`
+- both files were committed on the branch after the PR's last **net code change** (what
+  the branch changes compared with `main`), so a review can't approve code that changed
+  afterwards. A clean catch-up merge of `main` doesn't make them stale; a conflict
+  resolution or any other edit inside a merge commit that changes code does.
+  `specs/<id>/post-deploy.md` doesn't count as code; `tasks/decisions/**` and the frozen
+  archive `tasks/decisions.md` do count as code. A PR that changes only `tasks/**` still
+  needs both gate files committed on the branch. Any new code change means both gates
+  run again, each in its own commit. If equality can't be shown the gate is stale (fail
+  safe); no merge-base with `main` is a FAIL.
+- if the PR's net change touches a protected path (`.github/**`, `scripts/**`,
+  `rules/**`, `roles/**`, `templates/**`, `ORCHESTRATOR.md`, `AGENTS.md`,
+  `.gitleaks.toml`, `package.json`, `package-lock.json`, `supabase/config.toml`), the
+  PR carries the `framework-change-approved` label. Only the person adds it
+  (AGENT_RULES 18a). A protected file changed on `main` and brought in by a catch-up
+  merge doesn't count as the PR's change.
+- the label must be applied (GitHub server time) strictly after the last push that
+  changed the PR's net change on protected paths; commit dates are never used. So
+  **the person re-labels after** (a) a force-push, (b) any push that changes a
+  protected file, (c) a catch-up merge where `main` changed a protected file that this
+  PR also changes. A push that changes only non-protected files needs no re-label.
+  When the label time or the push times can't be read, the gate fails (fail closed).
+
+Branch protection on `main`: PR required, 0 approvals, required checks `verify`,
+`db-check`, `secrets`, `merge-gate`, and **"Do not allow bypassing the above settings"
+on** (admins included).
+
+**A PR with merge conflicts gets no CI run** (`tasks/lessons.md` L19, L16). While a
+PR is `CONFLICTING`, GitHub starts no `pull_request` workflow runs, so `verify`,
+`db-check` and `secrets` don't run and only `merge-gate` (`pull_request_target`)
+does. A label change on such a PR doesn't produce a CI run either. `gh run rerun`
+re-uses the old run's event payload (the old labels), so it can't pick up a new
+label. To re-evaluate, resolve the conflict by merging `main` into the branch (the
+push starts a fresh run). Merging `main` before running the gates is recommended only
+for PRs whose code conflicts with `main`: the conflict resolution is a code change, so
+the gates would have to run again. A clean catch-up merge doesn't make the gates stale
+(it can still need a re-label, case (c) above). After each merge, git-release checks
+the other open PRs for conflicts.
+
+```
