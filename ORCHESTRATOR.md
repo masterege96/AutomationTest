@@ -115,7 +115,8 @@ label. To re-evaluate, resolve the conflict by merging `main` into the branch (t
 push starts a fresh run). Merging `main` before running the gates is recommended only
 for PRs whose code conflicts with `main`: the conflict resolution is a code change, so
 the gates would have to run again. A clean catch-up merge doesn't make the gates stale
-(it can still need a re-label, case (c) above). After each merge, git-release checks
+unless `main` changed a file this PR also changes (it can still need a re-label, case (c)
+above). After each merge, git-release checks
 the other open PRs for conflicts.
 
 **security** and **code-reviewer** each run in a fresh agent context, never the
