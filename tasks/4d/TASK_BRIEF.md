@@ -589,3 +589,13 @@ Fixes for security gate round 1 (F1 FAIL, N3, N7, N9) and code review round 1 (f
   fallback pattern), `669fe6a` (timeouts in `task-scripts.test.ts`).
 - **Verified:** `npx vitest run tests/integration/verify-fixes.test.ts`: 191 passed. `npm test`: 14 files, 441 passed,
   exit 0. verify.sh and `supabase` not run (coordinator runs verify). No script bug found.
+
+### orchestrator, 2026-11-26 (verify, gate round 2 next)
+
+- Gate round 1: security FAIL (F1: dollar-quoted / E'' strings could hide a DROP/TRUNCATE from the destructive scan),
+  review CHANGES_REQUESTED (same blocker). Fixed by devops-cicd (010dc73, b7fa168, 487e64a: lexer, no GRANT exemption
+  with ' or $, -a, is_local via stdin, S19 RISK only for the three named secrets / no policy, N9 variants); qa-test
+  regressions 80dc5f2. Round-1 gate files not committed. Main (4b) merged in (5cd7199).
+- Full `bash scripts/verify.sh`: `verify.sh: PASS 20/20 (0 skipped)`. Gate round 2 next, fresh contexts.
+- Task 4b AC25 (live label check) done on throwaway PR #18 with the person, 2026-11-26 14:30-14:34 UTC: PASS → FAIL
+  after a later protected push → PASS after re-label; PR closed unmerged.
