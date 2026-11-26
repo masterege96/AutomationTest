@@ -502,3 +502,11 @@ the output line prefixes and rule 3 are unchanged.
 ### orchestrator, 2026-11-25 (verify after F1 fix)
 
 - Full `bash scripts/verify.sh` on the F1 fix + regression tests: `verify.sh: PASS 19/19 (0 skipped)`. Gate round 2 next, fresh contexts.
+
+### orchestrator, 2026-11-26 (gate round 2)
+
+- Security round 2: PASS (F1 fixed and re-attacked; F2 LOW, already on main: gate.yml reads the label from the event
+  payload, so re-running an old `labeled` run can undo an unlabel → carried to 4c: read current labels via the API,
+  fail closed). Review round 2: APPROVE (nits). Both committed after the last code change.
+- After merge: AC25 live check with the person, including a force-push-back case; ORCHESTRATOR.md 3a (the person's
+  file) needs the new freshness and re-label rules.
