@@ -379,3 +379,11 @@ the other open PRs for conflicts.
   code and that a catch-up merge touching a file the PR also changes may report the gates stale).
 - **AC16 amended:** tasks/4h/lessons.md also closes L17 and L22 (fixed by 4b, never marked), so lessons.sh shows 7
   fewer open than main (L14, L20, L21, L25, L26, L17, L22); L11 stays open.
+
+### orchestrator, 2026-11-26 (gates round 2-3)
+
+- Round 2 (79e5814): security PASS, review APPROVE (should-fix: 3a catch-up sentence). Fixed in 923c6fc. Decision
+  file for the CI-only rule (0c602fd, 6a3d8b7). Round 3 on 6a3d8b7: security PASS, review APPROVE, committed after it.
+- The Handoff block "for the PR description" above (orchestrator draft) is superseded: the PR description quotes 3a
+  from ORCHESTRATOR.md at the final head.
+- GitHub CI on 79e5814: verify, db-check, secrets pass (19:24:31 UTC). Final-head CI follows the push.
