@@ -365,3 +365,17 @@ the other open PRs for conflicts.
 ### orchestrator, 2026-11-26 (verify)
 
 - Main (4d) merged in (e258e8f). Full `bash scripts/verify.sh`: `verify.sh: PASS 20/20 (0 skipped)`. State → IN_REVIEW; gates next, fresh contexts.
+
+### orchestrator, 2026-11-26 (gate round 1 fixes)
+
+- Security round 1: FAIL (F1: the production-check outcomes in roles/security.md left first-429-at-31..35 unassigned
+  and didn't require "every later one 429" for Burst-bound; threat model 4.5 is the reference). Review round 1:
+  APPROVE (nits). Round-1 gate files not committed.
+- **AC8 amended:** the three outcomes must cover every result: Pass (first 429 at or before the baseline limit, every
+  later one 429, never a success); Burst-bound (first 429 after that but no later than attempt bucket size + 1, every
+  later one 429, at most one non-429 among the 2 requests after the wait, never a success); Fail (anything else).
+- Also fixed: security N2 (roles/security.md:9 "rule 1" removed), review nit 1 / security N3 (git-release rule 3 now
+  matches 3a: merge main first when the branch conflicts), review nit 2 / security N1 (3a says plainly what counts as
+  code and that a catch-up merge touching a file the PR also changes may report the gates stale).
+- **AC16 amended:** tasks/4h/lessons.md also closes L17 and L22 (fixed by 4b, never marked), so lessons.sh shows 7
+  fewer open than main (L14, L20, L21, L25, L26, L17, L22); L11 stays open.

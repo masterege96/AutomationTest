@@ -13,3 +13,8 @@ now documents and proposes, the person sets them (AGENT_RULES 18a). L11 stays op
 S27), so it is not closed here.
 
 Closes: L14, L20, L21, L25, L26
+
+Also closed here (bookkeeping, orchestrator, 2026-11-26): L17 (post-deploy.md no longer counts as code) and L22 (a
+clean catch-up merge no longer makes gates stale) were fixed by task 4b (PR #17, merged 2026-11-26) but never marked.
+
+Closes: L17, L22
