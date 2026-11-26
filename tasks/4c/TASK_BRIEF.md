@@ -550,3 +550,13 @@ unlabel in the same second → empty; owner label after an earlier unlabel → t
 - Update any assertion on the old B2 reason text.
 
 **Not run (the person's rule):** test suites, verify.sh. `bash -n scripts/gate-check.sh` OK.
+
+### orchestrator, 2026-11-26 (gate round 1)
+
+- Security round 1: FAIL (F1 HIGH: a PR workflow with issues: write could add framework-change-approved itself; F3
+  security-events; F4 residual wording). Review round 1: CHANGES_REQUESTED (B-1: SIGPIPE skips on large files; S-1
+  residual: re-runs of pre-merge gate runs use the old logic). Round-1 gate files not committed.
+- Fixed by devops-cicd in 7092a20 / 60f615b. **AC19 amended:** B2 FAILs a new/changed workflow granting write on
+  checks, statuses, issues, pull-requests, actions or security-events (or write-all); label time only from a `labeled`
+  event by the repository owner with actor type User, with no later `unlabeled`.
+- After merge: trigger a fresh gate run on every open PR; AC29 only on post-merge runs.
