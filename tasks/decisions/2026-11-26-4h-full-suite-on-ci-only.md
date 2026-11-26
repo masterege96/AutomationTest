@@ -2,7 +2,7 @@
 
 - **Date:** 2026-11-26 (19:30:54 UTC)
 - **Task:** 4 (all remaining step-4 work)
-- **Who:** the person, in their own words (project thread, 19:30:54 UTC, as relayed verbatim by the coordinator):
+- **Who:** the person, in their own words (project thread, 19:30:54 UTC; received directly from the person in this thread):
   "full suite runs on github, pc only runs tests a change touches, one test job at a time, and githubs run must pass
   before any merge"
 - **Source:** the project thread
