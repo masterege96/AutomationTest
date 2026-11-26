@@ -28,3 +28,15 @@ Closes: L5, L15, L27
   mtimes, so an mtime-only "written by this build" check reported no bundle on a clean tree.
 - **Fix:** verify.sh counts bundle files as this build's when the bundle dirs held no files before the build, or the
   file list changed, or a file is newer than a marker taken before the build.
+
+## L4d.3. Follow-ups from the 4d round-2 gates (open, devops-cicd)
+
+- Fail closed when the destructive-scan awk itself errors (`verify.sh` `|| true` treats an error as "no hits"; same
+  pattern as the old grep on main). Suggested: `hits=$(destructive_hits "$m") || hits="0:(destructive scan failed)"`.
+- Raw-scan a migration that has nested `/* */` comments or a dollar tag right after an alphanumeric number, because
+  the Supabase CLI's statement splitting isn't modelled (security N1, N2).
+- `bootstrap-check.sh` close-line check and the vitest-config check: use `grep … < <(…)` instead of a pipe under
+  `pipefail` (SIGPIPE on files > ~64 KB).
+- Scan `.next/server/app` (prerendered pages) for secrets too; fixture verify runs inside `npm test` overwrite the
+  fixed `/tmp/verify-*.log` paths (use `${TMPDIR:-/tmp}` / a per-run dir; ties in with 4g's lock).
+- Statements split over lines (`drop\ntable t`) are still not caught (same as main).
