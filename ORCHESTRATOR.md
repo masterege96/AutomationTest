@@ -84,8 +84,8 @@ named by the branch (`<type>/<id>-<name>`):
   file this PR also changes (then they may be reported stale: fail safe); a conflict
   resolution or any other edit inside a merge commit that changes code does. Code means
   every path except the two gate files and `tasks/**`: `specs/<id>/post-deploy.md` doesn't
-  count as code either, while `tasks/decisions/**` and the frozen archive
-  `tasks/decisions.md` do count as code. A PR that changes only `tasks/**` still
+  count as code either, while `tasks/decisions/**` and
+  the frozen archive `tasks/decisions.md` do count as code. A PR that changes only `tasks/**` still
   needs both gate files committed on the branch. Any new code change means both gates
   run again, each in its own commit. If equality can't be shown the gate is stale (fail
   safe); no merge-base with `main` is a FAIL.
