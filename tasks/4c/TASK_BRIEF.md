@@ -560,3 +560,15 @@ unlabel in the same second → empty; owner label after an earlier unlabel → t
   checks, statuses, issues, pull-requests, actions or security-events (or write-all); label time only from a `labeled`
   event by the repository owner with actor type User, with no later `unlabeled`.
 - After merge: trigger a fresh gate run on every open PR; AC29 only on post-merge runs.
+
+### qa-test, 2026-11-26 (gate round-1 regressions)
+
+- `fc1bcf0` updates `tests/integration/gate-spoof.test.ts`; `gate-check.test.ts` is unchanged (its 4b static tests still match the new events read).
+  - The AC19 `issues: write` case was a PASS before round 1. It is now a B2 FAIL, and the B2 reason text is updated.
+  - New B2 FAIL cases: `issues`, `pull-requests`, `actions` and `security-events` write, at workflow and job level, in block, flow, quoted and mixed-case forms.
+  - Still PASS: `id-token: write` with read scopes only, and the unchanged `drift.yml` (AC1).
+  - B-1/N-1: changed workflows of 300 KB or more (6000 padding lines), each line carrying an invalid UTF-8 byte, a NEL, `# merge-gate`, or a leading tab. Each FAILs with its reason on line 9.
+  - N-2: a changed gate.yml that is still `pull_request_target`-only, with a comment added and `checks: write` granted. It gets a B2 FAIL for gate.yml and no not-exempt line.
+  - F1, static: the events read is a GET; it selects `labeled`/`unlabeled` and prints `.actor.type` and `.actor.login`; `OWNER` comes from `github.repository_owner`. All 4 `gh api` calls are explicit GETs.
+  - F1, offline: 11 runs of gate.yml's label-time awk filter (taken from the file itself). Owner User gives the time. Bot, bot with the owner's login, non-owner, unlabel later, unlabel in the same second, relabel by a bot after an unlabel, a malformed line, and no events all give none. Owner relabel after an unlabel gives the later time.
+- Ran only `npx vitest run tests/integration/gate-spoof.test.ts`: **194 passed** (20m21s). No script bugs found.
