@@ -14,7 +14,7 @@
 // A gate-check run takes ~10 s on Windows, so the fixture tests run concurrently (Vitest's default limit of 5)
 // with async child processes and a generous timeout.
 // On Windows, Git Bash is called explicitly (%ProgramFiles%\Git\bin\bash.exe); elsewhere `bash`. git must be on PATH.
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -41,7 +41,8 @@ const SPOOF_PASS = "  PASS  merge-gate spoofing: no workflow at the head can rep
 const SPOOF_ANY = "  FAIL  merge-gate spoofing:";
 const spoofFail = (path: string) => `  FAIL  merge-gate spoofing: ${path}: `;
 const B1 = "contains the text 'merge-gate'";
-const B2 = "grants write access to checks or statuses";
+// Round 1 (AC19 amended, 7092a20): B2 covers checks, statuses, issues, pull-requests, actions, security-events.
+const B2 = "grants write access to checks, statuses, issues, pull-requests, actions or security-events";
 const B3 = "leaves the token permissions to the repo default";
 const UNSAFE = "can't be read safely";
 const LINK = "is a symlink or submodule";
@@ -320,7 +321,8 @@ const PR_HEAD = (perms: string) => `name: y\non: pull_request\n${perms}`;
 const OK_CASES: [string, string][] = [
   ["AC6: job id build with a matrix and no name:", wf("  build:\n    strategy:\n      matrix:\n        n: [a, b]\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ${{ matrix.n }}\n")],
   ["AC12: job build with a step 'name: check gate config'", "name: y\non: pull_request\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-24.04\n    steps:\n      - name: check gate config\n        run: echo ok\n"],
-  ["AC19 (B2): contents: read, pull-requests: read, issues: write", wf(job("build"), PR_HEAD("permissions:\n  contents: read\n  pull-requests: read\n  issues: write\n"))],
+  ["AC19 (B2, amended): contents: read, pull-requests: read, id-token: write", wf(job("build"), PR_HEAD("permissions:\n  contents: read\n  pull-requests: read\n  id-token: write\n"))],
+  ["AC19 (B2, amended): job-level id-token: write and flow { contents: read, id-token: write }", wf(job("a", "    permissions:\n      id-token: write\n") + job("b", "    permissions: { contents: read, id-token: write }\n"), PR_HEAD(""))],
   ["AC20 (B3): permissions: {} at the workflow level", wf(job("build"), PR_HEAD("permissions: {}\n"))],
   ["AC20 (B3): permissions: read-all at the workflow level", wf(job("build"), PR_HEAD("permissions: read-all\n"))],
   ["AC20 (B3): no workflow-level permissions, every job has its own", wf(job("a", "    permissions:\n      contents: read\n") + job("b", "    permissions: {}\n"), PR_HEAD(""))],
@@ -539,6 +541,15 @@ describe.concurrent("gate-check.sh merge-gate spoofing, the exempt gate file (ta
     expectFail(res);
   });
 
+  it("N-2 (round 1): changed gate.yml, comment-only plus checks: write, still pull_request_target only -> B2 FAIL for gate.yml", { timeout: TIMEOUT }, async () => {
+    if (!WF_GATE.includes("\npermissions:\n  contents: read\n")) throw new Error("gate.yml's permissions block changed: update this test");
+    const text = `${WF_GATE.replace("\npermissions:\n  contents: read\n", "\npermissions:\n  contents: read\n  checks: write\n")}# a comment line\n`;
+    const res = await runSpoof({ [GATE]: text });
+    expectSpoof(res, GATE, B2);
+    expectNoLine(res, `${spoofFail(GATE)}${NOT_EXEMPT}`); // still exempt (b): only B2/B3 apply
+    expectNoLine(res, `${spoofFail(GATE)}job id`);
+  });
+
   it("AC16: the same comment-only gate.yml change with the label current -> PASS", { timeout: TIMEOUT }, async () => {
     const res = await runSpoof({ [GATE]: `${WF_GATE}# a comment line\n` });
     expectNoSpoof(res);
@@ -585,7 +596,18 @@ describe.concurrent("gate-check.sh merge-gate spoofing, S14-B (task 4c AC18-AC21
     true, // B1 only: no reserved job, permissions: {} set
   ];
   const b2 = (n: string, text: string, reason = B2): [string, string, string, boolean] => [`AC19 (B2): permissions ${n}`, text, reason, false];
-  const SB_CASES: [string, string, string, boolean][] = [
+  // A changed workflow of >= 300 KB: the 8 lines of wf(job("build")), then 6000 comment lines, each with `marker`
+  // at its end (lead: at its start).
+  const big = (n: string, marker: Buffer, reason: string, lead = false): [string, Buffer, string, boolean] => {
+    const text = Buffer.from("# padding line for a large workflow file, 300 KB or more");
+    const pad = Buffer.concat(lead ? [marker, text, Buffer.from("\n")] : [text, marker, Buffer.from("\n")]);
+    const head = wf(job("build"));
+    if (head.split("\n").length !== 9) throw new Error("big(): the head is no longer 8 lines, fix the expected line numbers");
+    const buf = Buffer.concat([Buffer.from(head), ...Array.from({ length: 6000 }, () => pad)]);
+    if (buf.length < 300 * 1024) throw new Error("big(): fixture under 300 KB");
+    return [`B-1: a ${Math.round(buf.length / 1024)} KB changed workflow with ${n} on every padding line`, buf, reason, true];
+  };
+  const SB_CASES: [string, string | Buffer, string, boolean][] = [
     b1("a step name:", wf(`  build:\n    runs-on: ubuntu-24.04\n    steps:\n      - name: merge-gate\n        run: echo hi\n`)),
     b1("a run: line posting a status", wf(`  build:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: gh api repos/o/r/statuses/$SHA -f state=success -f context=merge-gate\n`)),
     b1("an action input name:", wf(`  build:\n    runs-on: ubuntu-24.04\n    steps:\n      - uses: some/action@0123456789abcdef0123456789abcdef01234567\n        with:\n          name: merge-gate\n`)),
@@ -602,6 +624,26 @@ describe.concurrent("gate-check.sh merge-gate spoofing, S14-B (task 4c AC18-AC21
     b2("job-level statuses: write", wf(job("build", "    permissions:\n      statuses: write\n"), PR_HEAD("permissions: {}\n"))),
     b2("job-level flow { checks: write }", wf(job("build", "    permissions: { checks: write }\n"), PR_HEAD("permissions: {}\n"))),
     b2('quoted key "checks": write (block)', wf(job("build"), PR_HEAD('permissions:\n  "checks": write\n')), ""),
+    // Round 1 (security F1/F3, AC19 amended): the other write scopes (add a label, re-run or dispatch, code scanning).
+    b2("issues: write (a PASS case before round 1)", wf(job("build"), PR_HEAD("permissions:\n  contents: read\n  pull-requests: read\n  issues: write\n"))),
+    b2("Issues: 'Write' (case, quotes)", wf(job("build"), PR_HEAD("permissions:\n  Issues: 'Write'\n"))),
+    b2("job-level issues: write", wf(job("build", "    permissions:\n      issues: write\n"), PR_HEAD("permissions: {}\n"))),
+    b2('flow { "issues": write }', wf(job("build"), PR_HEAD('permissions: { "issues": write }\n'))),
+    b2("pull-requests: write", wf(job("build"), PR_HEAD("permissions:\n  pull-requests: write\n"))),
+    b2("job-level pull-requests: write", wf(job("build", "    permissions:\n      pull-requests: write\n"), PR_HEAD("permissions: {}\n"))),
+    b2("job-level flow { Pull-Requests: WRITE }", wf(job("build", "    permissions: { Pull-Requests: WRITE }\n"), PR_HEAD("permissions: {}\n"))),
+    b2("actions: write", wf(job("build"), PR_HEAD("permissions:\n  actions: write\n"))),
+    b2("flow { contents: read, actions: write }", wf(job("build"), PR_HEAD("permissions: { contents: read, actions: write }\n"))),
+    b2('job-level actions: "write"', wf(job("build", '    permissions:\n      actions: "write"\n'), PR_HEAD("permissions: {}\n"))),
+    b2("security-events: write", wf(job("build"), PR_HEAD("permissions:\n  security-events: write\n"))),
+    b2("job-level security-events: write", wf(job("build", "    permissions:\n      security-events: write\n"), PR_HEAD("permissions: {}\n"))),
+    b2("flow { 'security-events': 'write' }", wf(job("build"), PR_HEAD("permissions: { 'security-events': 'write' }\n"))),
+    // Round 1 (review B-1, N-1): >= 300 KB files with the finding on every padding line from line 9 on; before the
+    // fix the early-exiting grep made the pipeline fail (SIGPIPE) and the check was skipped.
+    big("an invalid UTF-8 byte", Buffer.from([0xff]), "can't be read safely (line 9: not valid UTF-8)"),
+    big("a NEL (0xc2 0x85)", Buffer.from([0xc2, 0x85]), "can't be read safely (line 9: control character or YAML 1.1 line break)"),
+    big("# merge-gate", Buffer.from(" merge-gate"), `${B1} (line 9)`),
+    big("a leading tab (N-1)", Buffer.from("\t"), "can't be read safely (line 9: tab outside a block scalar)", true),
     [
       "AC20 (B3): no workflow-level permissions, the only job has none",
       wf(job("build"), PR_HEAD("")),
@@ -746,11 +788,59 @@ function block(text: string, re: RegExp): string {
   return cmds.slice(i, j < 0 ? undefined : j + 1).join("\n");
 }
 
+const LABEL_AWK = (() => {
+  const m = WF_GATE.match(/awk -v owner="\$OWNER" '([\s\S]*?)' > "\$RUNNER_TEMP\/label-time"/);
+  if (!m) throw new Error("gate.yml: label-time awk filter not found");
+  return m[1];
+})();
+
 describe("gate.yml and gate-check.sh static checks (task 4c AC22, AC23, AC25-AC27, AC32)", () => {
   const all = steps();
   const read = all.find((s) => /github\.token/.test(s.text));
   const gate = all.find((s) => /scripts\/gate-check\.sh/.test(s.text));
   const apis = commands(read?.text ?? "").filter((c) => /\bgh\s+api\b/.test(c));
+
+  // Round 1 (security F1, AC19 amendment): the label time is the latest 'labeled' event by the repository owner
+  // with actor type User, and only if no 'unlabeled' event (any actor) is at the same second or later.
+  it("F1 (round 1): the events read is a GET of labeled/unlabeled events for the label, with actor type and login; OWNER from the workflow context", () => {
+    expect(read?.text).toMatch(/^\s+OWNER:\s*\$\{\{\s*github\.repository_owner\s*\}\}\s*$/m);
+    const events = apis.find((c) => /issues\/\$PR\/events/.test(c)) ?? "";
+    expect(events).toMatch(/--method GET/);
+    expect(events).toMatch(/--paginate/);
+    expect(events).toMatch(/\.event == "labeled" or \.event == "unlabeled"/);
+    expect(events).toMatch(/\.label\.name == "framework-change-approved"/);
+    expect(events).toMatch(/"\\\(\.created_at\) \\\(\.event\) \\\(\.actor\.type\) \\\(\.actor\.login\)"/);
+    expect(LABEL_AWK).toMatch(/\$2 == "labeled" && \$3 == "User" && \$4 == owner/);
+    expect(read?.text).toMatch(/awk -v owner="\$OWNER" '/);
+    expect(read?.text).toMatch(/> "\$RUNNER_TEMP\/label-time"/);
+  });
+
+  const OWNER = "the-owner";
+  const E1 = "2026-11-25T11:00:00Z";
+  const E2 = "2026-11-25T12:00:00Z";
+  const E3 = "2026-11-25T13:00:00Z";
+  const ev = (t: string, e: string, type: string, login: string) => `${t} ${e} ${type} ${login}`;
+  it.each([
+    ["owner User labeled -> its time", [ev(E1, "labeled", "User", OWNER)], E1],
+    ["bot actor (a PR workflow's token) -> no label time", [ev(E1, "labeled", "Bot", "github-actions[bot]")], ""],
+    ["bot actor with the owner's login -> none (type must be User)", [ev(E1, "labeled", "Bot", OWNER)], ""],
+    ["non-owner User -> none", [ev(E1, "labeled", "User", "someone-else")], ""],
+    ["owner labeled, unlabeled later (by a bot) -> none", [ev(E1, "labeled", "User", OWNER), ev(E2, "unlabeled", "Bot", "github-actions[bot]")], ""],
+    ["owner labeled, unlabeled in the same second -> none", [ev(E1, "labeled", "User", OWNER), ev(E1, "unlabeled", "User", OWNER)], ""],
+    ["owner labeled, unlabeled, bot labeled again -> none", [ev(E1, "labeled", "User", OWNER), ev(E2, "unlabeled", "User", OWNER), ev(E3, "labeled", "Bot", "github-actions[bot]")], ""],
+    ["unlabeled, then owner labeled again -> the later time", [ev(E1, "unlabeled", "User", OWNER), ev(E2, "labeled", "User", OWNER)], E2],
+    ["owner labeled twice, bot labeled last -> the owner's latest", [ev(E1, "labeled", "User", OWNER), ev(E2, "labeled", "User", OWNER), ev(E3, "labeled", "Bot", "x[bot]")], E2],
+    ["a malformed line (3 fields) next to a good one -> none", [ev(E1, "labeled", "User", OWNER), `${E2} labeled User`], ""],
+    ["no events -> none", [], ""],
+  ] as [string, string[], string][])("F1 (round 1): gate.yml's label-time filter, %s", (_n, lines, want) => {
+    const r = spawnSync(BASH, ["-c", 'awk -v owner="$1" "$2"', "_", OWNER, LABEL_AWK], {
+      input: `${lines.join("\n")}\n`,
+      encoding: "utf8",
+      env: cleanEnv(),
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect((r.stdout ?? "").trim()).toBe(want);
+  });
 
   it("AC22: still pull_request_target only, with opened, synchronize, reopened, labeled, unlabeled, edited", () => {
     expect(WF_GATE).toMatch(/^on:\s*\n\s+pull_request_target:/m);
@@ -764,7 +854,7 @@ describe("gate.yml and gate-check.sh static checks (task 4c AC22, AC23, AC25-AC2
     expect(apis).toHaveLength(4);
     for (const c of apis) {
       expect(c).not.toMatch(/(--method|-X)\s+(POST|PUT|PATCH|DELETE)/i);
-      if (/\s(-f|-F|--field|--raw-field)\s/.test(c)) expect(c).toMatch(/--method GET/);
+      expect(c).toMatch(/--method GET/); // round 1: every call, the events read included, is an explicit GET
       expect(c).not.toMatch(/--input/);
     }
     expect(read?.text).not.toMatch(/\bcurl\b|\bwget\b/);
