@@ -418,7 +418,7 @@ duplicate top-level / job-id / job-level keys, a flow-mapping `jobs:` or job) â†
   A gate-check run takes ~10 s on this PC (process start-up), so fixture tests need a generous timeout.
 - **Left / next role must know:** qa-test: AC1-AC28 tests plus the two static-test updates above; fixture copies of
   the workflows from the worktree. The ci.yml line-3 comment mentioning `merge-gate` will trip B1 the next time ci.yml
-  changes (AC21; ci.yml is out of scope here), and an open PR cut before main changes ci.yml or drift.yml now FAILs B1/B3
-  checks on those files until it merges main (they count as changed). Residuals (AC25) are in the gate-check.sh header
+  changes (AC21; ci.yml is out of scope here), and an open PR cut before main changes ci.yml now FAILs B1 on it
+  until it merges main (its copy counts as changed). Residuals (AC25) are in the gate-check.sh header
   for security to confirm. AC29-AC31 after merge. This PR changes protected paths: the person labels it after the last
   push.
