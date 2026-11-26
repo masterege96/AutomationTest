@@ -575,3 +575,17 @@ Fixes for security gate round 1 (F1 FAIL, N3, N7, N9) and code review round 1 (f
     (`tr | grep -q` under pipefail).
   - Re-gate needed: security and code review. The PR still needs the person's `framework-change-approved` label after the
     last push.
+
+### qa-test, 2026-11-26 (gate round-1 regressions)
+
+- **Changed:** `tests/integration/verify-fixes.test.ts` (commit `80dc5f2`), per the devops-cicd entry "gate round-1 fixes":
+  F1: the 14 SQL cases (each FAIL with exactly its `<n>:<line>` hit) and the 3 kept exemptions (PASS); N3: NUL-byte bundle
+  with a generated `sb_secret_` key, a service-role JWT, and the local `SERVICE_ROLE_KEY` value (FAIL each, no value shown);
+  N9: `--pass-with-no-tests`, `passWithNoTests: true` in `vitest.config.ts` (3 spellings) and `.mts`, both places (one fix
+  line each), commented / `false` (PASS), config with no test files (PASS no test files yet), this repo's config clean;
+  N7: AC35 split per the new contract (AC27a RISK; AC27b-e and the empty list FAIL with no RISK), named-secret subsets
+  RISK, any other `SUPABASE_*` name FAIL listing all names, mixed policy RISK + secrets FAIL summary. Earlier tests
+  unchanged (a spec change, not a weakening: b-e are stricter now). Also earlier: `cba8034` (AC34 uses verify.sh's
+  fallback pattern), `669fe6a` (timeouts in `task-scripts.test.ts`).
+- **Verified:** `npx vitest run tests/integration/verify-fixes.test.ts`: 191 passed. `npm test`: 14 files, 441 passed,
+  exit 0. verify.sh and `supabase` not run (coordinator runs verify). No script bug found.
