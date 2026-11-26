@@ -55,6 +55,7 @@ Proves all applicable rows (the abuse tests). security decides which rows apply.
 - Every line in `test-plan.md` has a test, and all pass on the branch.
 - Every row marked applicable in the threat model has an abuse test.
 - `verify.sh` passes (including `test:e2e`).
+- `package.json`'s `test` script has no `--passWithNoTests` once any test file exists (verify.sh FAILs otherwise; tasks/lessons.md L5).
 
 ## Hands off to
 security (gate).
