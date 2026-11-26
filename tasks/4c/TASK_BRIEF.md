@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | SPEC_READY |
+| State | IN_REVIEW |
 | Owner role | devops-cicd (build: `scripts/gate-check.sh`, `.github/workflows/gate.yml`), qa-test (tests: `tests/integration/**`) |
 | Branch | `ci/4c-gate-spoofing-stopgap` |
 | Worktree | `../wt-4c-devops-cicd` |
