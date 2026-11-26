@@ -359,3 +359,66 @@ plain/quoted/flow values, a second document or `...`, directives, invalid UTF-8,
 duplicate top-level / job-id / job-level keys, a flow-mapping `jobs:` or job) → `can't be read safely`. A job
 `name:` that is empty, a block scalar, a flow value, contains a backslash in double quotes, or non-ASCII →
 `can't be read safely` too.
+
+### devops-cicd, 2026-11-26 (build)
+
+- **Changed:** `scripts/gate-check.sh` (spoof check, `PR_CURRENT_LABELS` / `PR_CURRENT_BASE`, header with the spoof
+  rules and the AC25 residuals), `.github/workflows/gate.yml` (read step also reads current labels and base; Gate
+  step derives `FRAMEWORK_CHANGE_APPROVED` from them). Commits `b7c5019` (interface entry above, unchanged since)
+  and `c780e73` (build). Not BLOCKED: the check needs only git, bash, grep, sed, tr and POSIX awk (awk is already used
+  by `verify.sh`, `board.sh`, `lessons.sh`); the awk reader also runs under `gawk --posix` (proxy for the runner's mawk).
+- **How it reads:** `git ls-tree -r` of the head commit, filtered to `.github` entries (case-insensitive), blobs via
+  `git cat-file blob`; no checkout, no working tree. Per file: NUL / UTF-8 / control-character / NEL-LS-PS checks
+  (grep with byte classes), then the strict line reader (subset in the interface entry). Exempt (a) = path exactly
+  `.github/workflows/gate.yml` with the base's blob id; exempt (b) = changed but `on:` is exactly
+  `pull_request_target` (scalar, `[x]` or a one-key mapping).
+- **gate.yml:** same step (name kept from 4b so the token-step test still finds it): `gh api --method GET --paginate
+  repos/$REPO/issues/$PR/labels?per_page=100 --jq '.[].name'` and `gh api --method GET repos/$REPO/pulls/$PR --jq
+  '.base.ref'`; either failing (or an empty base) → `::error::could not read the PR's current labels|base branch ...`
+  and `exit 1` (Q4). No expression reads `github.event.pull_request.labels`; token still only in that step; no
+  `${{ }}` in run blocks; permissions, checkout pin, `persist-credentials: false`, "Only PRs into main" and the head
+  pin unchanged. Field names confirmed with read-only GETs on PR #17 (`.[].name` → `framework-change-approved`,
+  `.base.ref` → `main`).
+- **Scratch-fixture evidence** (throwaway repos in the OS temp dir, deleted on exit; main = this worktree's
+  `gate.yml`/`ci.yml`/`drift.yml` + `app/page.tsx`, branch `ci/9x-demo`, spoof commit before fresh gates, label inputs
+  current unless stated; 81 cases, all as expected):
+  - PASS exit 0: AC1 baseline; AC6 matrix without name; AC8 `.github/x.yml`, `docs/x.yml`, `x.yml.txt`; AC12 step
+    `name: check gate config`; AC19 `issues: write` + reads; AC20 `read-all`, and per-job permissions; block-scalar
+    content `name: gate` inside `run: |`; AC10 untracked spoof in the working tree; AC16 comment-only gate.yml change
+    with label; AC17 main changed gate.yml after the branch cut, no label; F2 `PR_CURRENT_LABELS` containing the label;
+    `PR_CURRENT_BASE=main`.
+  - FAIL exit 1 with `  FAIL  merge-gate spoofing: <path>:`: AC2 (id `merge-gate`, `gate`); AC3 (name `merge-gate`,
+    `gate`); AC4 `"merge-gate"`, `'merge-gate'` id, `Merge-Gate`, `MERGE-GATE`, extra spaces, trailing comment,
+    `"name":` key, `name :`, `"merge\x2dgate"`, `>-` and `|` block names, anchor + `<<: *j` (also when only the
+    second job merges), alias `*n`, flow `jobs: {...}`, flow job, `? merge-gate`, CRLF, BOM; AC5 both expressions;
+    AC6 `merge-gate` with matrix; AC7 second `---`, `...`, tab, `!!str` value and key, duplicate `name:`, duplicate
+    `jobs:`, invalid UTF-8; AC8 `x.yaml`, `X.YML`, `sub/x.yml`; AC9 file symlink, `.github/workflows` symlink and
+    submodule; AC10 head-only with the working tree at main; AC11 (every spoof case has the label current);
+    AC14 `gate2.yml` copy and rename to `merge.yml`; AC15 `pull_request`, `push`, `workflow_dispatch`, `on: &t`;
+    AC18 `context=merge-gate` in `run:`, comment `# Merge-Gate`; AC19 `checks: write`, job `Statuses: 'Write'`,
+    `WRITE-ALL`, flow `{ contents: read, "checks": write }`; AC20 one job without permissions; AC21 ci.yml + one
+    comment line (B1 on its line 3); AC24 always-pass + `pull_request`; extra: name on the next line, plain
+    continuation, escaped multi-line double quote, lone CR, `name:` after a same-indent `steps:` list, `name:` after a
+    block scalar.
+  - Other FAIL exit 1: AC16 / AC24 (prt-only) without label → 4b `without the person's 'framework-change-approved'
+    label:` line (spoof PASS); F2 `PR_CURRENT_LABELS=other` and `=""` with `FRAMEWORK_CHANGE_APPROVED=1` → same line;
+    `PR_CURRENT_BASE=side` and `""` → `  FAIL  PR base is not main`.
+- **Tests (not run in full: shared PC):** one partial `npx vitest run tests/integration/gate-check.test.ts
+  tests/integration/task-scripts.test.ts` (interrupted by the pause): the 4b gate-check fixture tests pass, except two
+  F1 tests that failed in `git init` when the run was stopped (environmental); **two 4b static tests fail by design**
+  and need qa-test to update them for AC26: `AC24: the read step only reads ...` (`expected 4 to be 2`: the step now
+  has four `gh api` GETs) and `AC24: fail closed ...` (it requires the payload expression
+  `FRAMEWORK_CHANGE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, ...) }}` that AC26 forbids).
+  `task-scripts.test.ts > lessons.sh > AC7: no open lessons` also failed (also in verify.sh); this diff doesn't touch
+  `lessons.sh` or lessons files, so it looks unrelated (qa-test / orchestrator to confirm). Earlier
+  `bash scripts/verify.sh --no-db --brief tasks/4c/TASK_BRIEF.md` (before the pause): `verify.sh: FAIL 2/15 failed:
+  npm run test, npm run test:e2e (1 skipped)`; scope, typecheck, lint, build PASS; test:e2e needs the local stack env.
+- **Platform notes (for qa-test):** on Git Bash, `$'\r'` passed as an awk `-v` value arrives empty and `grep -iF`
+  aborts in the C locale, so the script sets CR/TAB/BOM inside awk and matches `merge-gate` with bracket classes.
+  A gate-check run takes ~10 s on this PC (process start-up), so fixture tests need a generous timeout.
+- **Left / next role must know:** qa-test: AC1-AC28 tests plus the two static-test updates above; fixture copies of
+  the workflows from the worktree. The ci.yml line-3 comment mentioning `merge-gate` will trip B1 the next time ci.yml
+  changes (AC21; ci.yml is out of scope here), and an open PR cut before main changes ci.yml or drift.yml now FAILs B1/B3
+  checks on those files until it merges main (they count as changed). Residuals (AC25) are in the gate-check.sh header
+  for security to confirm. AC29-AC31 after merge. This PR changes protected paths: the person labels it after the last
+  push.
