@@ -466,3 +466,112 @@ Result lines are exactly the brief's texts (AC1-AC31). Additions and precisions 
 - Full `bash scripts/verify.sh` (with DB, local stack env in the shell only): `verify.sh: PASS 20/20 (0 skipped)`.
 - State → IN_REVIEW; security gate and code review next, each in a fresh context. Standing check: no workflow step
   reads a `SUPABASE_*` secret outside drift.yml (decision 2026-11-25-4d-supabase-secrets-accepted-until-step4.md).
+
+### devops-cicd, 2026-11-25 (gate round-1 fixes)
+
+Fixes for security gate round 1 (F1 FAIL, N3, N7, N9) and code review round 1 (finding 1, the blocker, and nit 5).
+
+- **Changed:** `scripts/verify.sh`, `scripts/bootstrap-check.sh`.
+  - **F1 / review 1 (`destructive_hits`), defense in depth:**
+    (a) The awk lexer follows Postgres for `$$...$$` and `$tag$...$tag$`, `E'...'`/`e'...'`, `'...'` and `"..."`. A dollar
+    quote closes only at the same tag. A `$` inside a word (`a$$b`) or a parameter (`$1`) doesn't open one, and a new tag can
+    start right after a closing tag. In an E-string a backslash escapes the next character, and `''` works too. An E-string
+    continues after a quote continuation (whitespace containing a newline, `--` comments allowed, then `'`). `;` and comment
+    markers inside any of these don't count. A `--` comment also ends at a CR.
+    (b) A GRANT/REVOKE/ALTER DEFAULT PRIVILEGES segment is exempt only if it contains no `'` and no `$` once comments are
+    removed.
+    (c) Fail closed: some files are scanned line by line on the raw text with nothing blanked, as before 4d. That happens
+    when a plain `'...'` string has an odd run of backslashes before a `'` (where it ends depends on
+    `standard_conforming_strings`), or when the file ends inside a string, identifier, dollar quote or comment.
+    awk runs with `LC_ALL=C` and uses POSIX features only. Output format (`<n>:<line>`) and line names are unchanged.
+  - **N3:** `grep -a` on the `sb_secret_` and JWT pattern greps (`-rahoE`), so a bundle file with a NUL byte is still read.
+  - **Review 5 / N1:** `is_local` passes the token to grep via stdin (`-f -`) and the local values via a process
+    substitution. Neither is on argv.
+  - **N7:** RISK applies only to exactly what the decision names. The policy line is RISK only for "no deployment branch
+    policy / all branches" (`deployment_branch_policy` null or absent). The secrets line is RISK only when every
+    repository-level `SUPABASE_*` secret found is one of `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` or
+    `SUPABASE_PROJECT_ID`. These FAIL even while the decision is open: protected branches, custom policies other than
+    exactly `main`, an empty custom list, and any other `SUPABASE_*` name. They keep the same FAIL line and `fix:` as before,
+    and `(found: ...)` lists every `SUPABASE_*` name. **This changes the earlier contract.** AC35 said "every AC27 case
+    (a-e) -> RISK"; now only AC27a is RISK.
+  - **N9:** the L5 check also triggers on `--pass-with-no-tests` in `scripts.test`. It also triggers on
+    `passWithNoTests: true` in a root `vitest.config.*` (key quoted or not, any spaces around `:`). Lines starting with
+    `//`, `/*` or `*` are ignored. Line names are unchanged. The detail lists the test file paths, then one fix line per
+    place found:
+    `Remove --passWithNoTests from package.json#scripts.test (tasks/lessons.md L5).` (unchanged),
+    `Remove --pass-with-no-tests from package.json#scripts.test (tasks/lessons.md L5).`,
+    `Remove passWithNoTests: true from vitest.config.ts (tasks/lessons.md L5).` (with the actual file name). Nothing is
+    printed when `scripts.test` is missing (AC23).
+- **Verified (scratchpad only; verify.sh and `supabase` not run, per the coordinator):**
+  - `destructive_hits` was extracted from `scripts/verify.sh` and run with gawk 5.3.2, `gawk --posix`, `gawk --traditional`
+    and busybox awk (Docker, local image, no network). The output was identical for all four. mawk isn't installed here and
+    wasn't downloaded. `gawk --lint` reports no gawk extensions, only POSIX-defined `substr` past the end and uninitialized
+    variables. CI's ubuntu mawk runs the qa tests below.
+  - Flagged, with the expected line: the four reproductions from the reports (review 1: `2:`, review 2: `1:`, gate 1: `1:`,
+    gate 2: `1:`), `grant select on "x;y" to anon; drop view v;` (`1:`), and every case in the table below. The round-1
+    function missed all four reproductions.
+  - 0 hits: the AC14 and ALTER DEFAULT PRIVILEGES privilege lists, the AC15 comments, and all four
+    `supabase/migrations/*.sql`.
+  - `grep -a`: a file with a NUL byte and a fake token gives 0 matches without `-a` and 1 with it.
+  - `is_local`: an exact match returns yes; a longer token, a prefix, or empty `LOCAL_VALS` returns no.
+  - The L5 block was extracted and run in fixture dirs: every N9 case below behaves as described.
+  - bootstrap-check on a scratch repo with a stub `gh`:
+    - null policy with the three named secrets: 2 RISK
+    - protected branches: FAIL
+    - custom `*`: FAIL
+    - `SUPABASE_ACCESS_TOKEN` plus `SUPABASE_SERVICE_ROLE_KEY`: FAIL listing both
+    - AC25 settings: 3 PASS
+- **For qa-test (`tests/integration/verify-fixes.test.ts`): add these cases, and change the AC35 ones as noted.** SQL is
+  written as a JS string body: `\n` is a newline, and any other `\` is one literal backslash in the file (write `\\` in the JS source). Run each as a new migration
+  without `DESTRUCTIVE_APPROVED`. Expect `  FAIL  destructive statements need approval` with exactly these hits:
+
+| SQL | hits |
+|-----|------|
+| `comment on table t is $$Users' data$$;\nselect 'x' \|\| '--'; delete from t;\n` | `2:select 'x' \|\| '--'; delete from t;` |
+| `select E'it\'s -- '; drop table missed;\n` | `1:` + the line |
+| `select $q$ ; grant all on t to x ' $q$; truncate t; select $$'$$;\n` | `1:` + the line |
+| `select E'\'; grant all on t to x '; drop table t; select E'\'';\n` | `1:` + the line |
+| `grant select on "x;y" to anon; drop view v;\n` | `1:` + the line |
+| `select $a$x$a$$b$ -- $b$; drop table t;\n` (tag right after a tag) | `1:` + the line |
+| `select E'a'\n  -- c\n'\' -- '; drop table t;\n` (E-string continuation) | `3:'\' -- '; drop table t;` |
+| `set standard_conforming_strings = off;\nselect 'it\'s -- '; drop table missed;\n` (ambiguous: raw scan) | `2:` + line 2 |
+| `select 'abc;\n/* x */ drop table t;\n` (unterminated string: raw scan) | `2:/* x */ drop table t;` |
+| `grant truncate on table a$b to anon;\n` (`$` in a GRANT: not exempt) | `1:` + the line |
+| `grant truncate on "it's" to anon;\n` (`'` in a GRANT: not exempt) | `1:` + the line |
+| `do $a$ begin perform $b$ $a$ $b$; end $a$;\nselect '--'; truncate t;\n` (inner tag inside an outer one) | `2:` + line 2 |
+| `prepare p as select $1; delete from t;\n` (`$1` is not a quote) | `1:` + the line |
+| `select a$$b, 'x'; delete from t; -- $$\n` (`$$` inside a word) | `1:` + the line |
+
+  - **Exemptions kept:** expect `  PASS  no destructive statements in new migrations` for each of these:
+    - `select E'it\'s fine'; -- drop table x\n`
+    - `create function f() returns int language sql as $fn$ select 1 $fn$; -- drop table x\n`
+    - `grant truncate on t to anon; -- it's ok, $$ here\n` (the quote and `$` are only in a comment)
+
+    Keep every existing AC14-AC19 test. A CR case (`-- x\rdrop table t;`) is also a hit, but the CR check FAILs that file
+    anyway, so it's optional.
+  - **N3:** a bundle file containing a NUL byte and a generated `sb_secret_` key gives the `sb-secret-key-pattern` FAIL. A
+    second one with a generated service-role JWT gives the `service-role-jwt-pattern` FAIL.
+  - **N9:** with `lib/foo.test.ts` present:
+    - `vitest run --pass-with-no-tests`: FAIL, detail is the path plus the kebab fix line.
+    - `vitest.config.ts` with `passWithNoTests: true` (also `"passWithNoTests" : true`) and `scripts.test` `vitest run`:
+      FAIL, detail is the path plus `Remove passWithNoTests: true from vitest.config.ts (tasks/lessons.md L5).`
+    - config with `// passWithNoTests: true` or `passWithNoTests: false`: `  PASS  test script has no --passWithNoTests`.
+    - config with `true` and no test files: `  PASS  test script may use --passWithNoTests (no test files yet)`.
+    - camelCase flag: detail unchanged (AC20).
+  - **N7 (change the AC35 tests):** with the decision open:
+    - AC27a (policy null or key absent): RISK, unchanged.
+    - AC27b-e and the empty custom list: `  FAIL  production deploys only from main (deployment branch policy)`, no RISK.
+    - secrets `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD`, `SUPABASE_PROJECT_ID` (any subset): RISK.
+    - those plus any other `SUPABASE_*` name (e.g. `SUPABASE_SERVICE_ROLE_KEY`):
+      `  FAIL  no repository-level SUPABASE_* secrets (found: <all SUPABASE_* names>)` plus the fix line.
+
+    Summary counts change to match. With the decision closed or missing, nothing changes (AC36).
+- **Left / must know:**
+  - Existing AC35 tests that expect RISK for AC27b-e will fail until qa-test updates them. This is the intended N7 contract
+    change.
+  - With the raw-scan fallback, a migration with a `'C:\'`-style string gets the old grep behaviour: GRANT lists with
+    TRUNCATE are flagged again in that file. This fails closed, and the approval label still works.
+  - Not done (follow-ups, unchanged): N4 (`.next/server` not scanned), review nit 3 (`/tmp/verify-*.log`), review nit 4
+    (`tr | grep -q` under pipefail).
+  - Re-gate needed: security and code review. The PR still needs the person's `framework-change-approved` label after the
+    last push.
