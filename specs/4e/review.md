@@ -88,3 +88,58 @@ decision for `2026-11-25-4d-supabase-secrets-accepted-until-step4.md`) are track
 
 Before merge: the person's `framework-change-approved` label after the last protected-path push; then `merge-gate` on
 the final head.
+
+## Round 3 (delta after catch-up merge, 2a9d562), 2026-11-27
+
+- **Role:** code-reviewer, fresh context (not the builder's, not security's; `specs/4e/security-gate.md` round 3 not
+  relied on). Numbering follows the orchestrator; this file had one earlier review (`c1bc12a`, code `ea73293`). No
+  round so far was `CHANGES_REQUESTED`, so this is a re-review forced by a code change, not a bounce (rule 2 /
+  ORCHESTRATOR §4 not triggered).
+- **Reviewed:** `git log dfc6bc5..HEAD` = `0295a56` (merge of `origin/main` at `fd13c77`, task 4ea), `2a9d562`
+  (test), `fb3c6f4` (security gate file only). `git diff dfc6bc5 HEAD -- . ':!specs/4ea' ':!tasks/4ea'` and
+  `git show 2a9d562`.
+- **Merge `0295a56` is clean:** `git show --cc 0295a56` is empty (no own hunk, no conflict resolution); the files
+  4ea changed on main and the files 4e changed since the merge base don't overlap. Its delta (`scripts/gate-check.sh`,
+  4ea's part of `gate-spoof.test.ts`, two decision files) was reviewed and merged under task 4ea and is not re-judged
+  here. The branch's net change vs main now also lists `tests/integration/gate-spoof.test.ts` (M) because of
+  `2a9d562`: inside the brief's allowed paths (`tests/integration/**`, qa-test), not protected, so no re-label is
+  needed for it.
+- **Run here:** `npx vitest run tests/integration/gate-spoof.test.ts`: `Test Files 1 passed (1)`, `Tests 265 passed
+  (265)`; `npx vitest run tests/integration/drift-workflow.test.ts`: `Tests 127 passed (127)`. `sha256sum` of
+  the worktree's `drift.yml` = `git show dfc6bc5:.github/workflows/drift.yml` =
+  `9aa3063d...5468` (the hash the test comment names, 175 lines); main's (`fd13c77`) is `45e4c075...`, different.
+  `git diff --check` on the delta: clean.
+
+### The test change (`tests/integration/gate-spoof.test.ts:1166-1177`)
+
+- **Cause is right.** `MAIN_FILES` (`:189-194`) puts `WF_DRIFT`, read from this worktree (`:35`), on the fixture's
+  main. After the merge the worktree holds 4e's drift.yml, byte-equal to `DRIFT_4E`, so `runDrift(DRIFT_4E)` committed
+  an unchanged file: no protected change, no label line, and the old `expectLine(res, LABEL_PASS)` failed.
+- **Fix is right and minimal.** `spoofRepo({ [DRIFT]: DRIFT_4E }, { [DRIFT]: baseDrift(ON_SCHEDULE) })` overrides
+  only main's drift.yml (`mainExtra` is spread after `MAIN_FILES`, `:198`), so the head's drift.yml is again a real
+  change, independent of which branch the suite runs on. `r.run(r.labelNow())` is exactly what `runSpoof` did
+  (`:207-210`), so label inputs are unchanged. No assertion removed or loosened: the four static checks on `DRIFT_4E`,
+  `LABEL_PASS`, and `expectExcPass` (exception line exactly once, no B2 FAIL, no spoof FAIL, spoof PASS,
+  `gate-check: PASS`) all remain.
+- **Still tests what its name and 4ea AC1 say:** 4e's file at the head -> exception line, no spoof FAIL, spoof PASS,
+  PASS. 4ea AC1 constrains only the head file, not main's; the fixture main being a "base drift" (itself with
+  `issues: write`) doesn't matter because the gate judges the head's workflows. The test is now stronger: before, it
+  only held while main's drift.yml happened to differ from 4e's.
+- **Neighbours checked:** AC4 (`:1212-1228`) uses `WF_DRIFT` (now 4e's file): "unchanged" and "+ comment line" still
+  hold and pass; 4e brief AC25's "gate-spoof AC1 (4c, main's unchanged workflows -> PASS)" passes in the same run.
+  No other drift.yml case commits a text equal to `WF_DRIFT` without a change.
+
+### Findings (round 3)
+
+| # | Severity | File:line | Finding | Owner |
+|---|----------|-----------|---------|-------|
+| R8 | nit | `tests/integration/gate-spoof.test.ts:1171-1172` | The comment is accurate but long; it could say simply "main gets a different drift.yml so the head's DRIFT_4E is a change on any branch (the worktree's drift.yml may already be 4e's)". Optional. | qa-test (optional) |
+| R9 | nit | `tasks/4e/TASK_BRIEF.md` Handoff | No Handoff line yet for `2a9d562` (why `gate-spoof.test.ts` is now in 4e's diff). One line helps git-release explain it in the PR body; `tasks/**`, doesn't stale the gates. | qa-test / orchestrator |
+
+Earlier findings: R2 and R5 resolved in `dfc6bc5` (G1/G2 in "After merge" steps, state `IN_REVIEW`); R1 and R3
+tracked as `tasks/4e/lessons.md` L4e.3 (with G3), R4 there too; R6 for the PR body; R7 info.
+No blocker, no should-fix open. Result stays **APPROVE** for code head `2a9d562`.
+
+Before merge (unchanged): `framework-change-approved` label applied after the last protected-path push (`2a9d562` and
+the merge changed no protected path in this PR's net change, so a label already applied after the last such push
+stays valid); then `merge-gate` on the final head, with this file committed after `2a9d562`.
