@@ -466,6 +466,8 @@ Result lines are exactly the brief's texts. Call interface and precisions qa-tes
 
 - orchestrator decision 2026-11-27: concurrency moved to job level, L4e.1
 
+- **qa-test, 2026-11-27:** added `tests/integration/drift-workflow.test.ts` (114 tests: static AC1-AC10, AC14, AC19-AC27, AC29 incl. job-level concurrency; executed URL check AC11-AC13 + abuse, judge AC15-AC18 + GITHUB_OUTPUT injection, and drift.yml's head/require/diff `run:` blocks with fake npx/grep/sha256sum stubs); `npx --no-install vitest run` on it: `Tests  114 passed (114)`, `gate-spoof.test.ts`: `Tests  194 passed (194)`; no code bugs found; not covered here: AC5 runtime, AC28, AC30-AC33, AC1/AC27 "unchanged vs main" (need git history), AC18 "diff file not readable" (chmod doesn't work on Windows).
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
