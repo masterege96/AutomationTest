@@ -35,3 +35,13 @@ flags are documented in CLI 3.2.0 `supabase db diff --help`: `--agent <auto|yes|
 `--output-format <text|json|stream-json>`); and `scripts/ci/drift-judge.sh` treats a diff whose first non-blank line
 starts with `{` or `[` as "drift check broken: diff output could not be read (unexpected output format)", exit 1,
 never `drift=yes`. Whether the flags alone give SQL is unproven until the next local or live run; the judge covers it.
+
+## L4e.3. Follow-ups from the 4e gates (open)
+
+- G3 / R3: `scripts/ci/drift-url-check.sh` accepts `@`, `%`, spaces, `?` and `#` in the password; restrict it to
+  `[A-Za-z0-9]+` (the person's steps already ask for letters and digits only). Owner: devops-cicd.
+- R1: a `check_run` for an older main commit passes the job `if:`, joins the `drift` group and can replace a
+  pending after-deploy run for main's head, then only skips; the nightly run still covers it. Watch AC32. Owner:
+  devops-cicd.
+- R4: the final check in `supabase/production/drift-role.sql` doesn't assert `rolconfig` (read-only default,
+  statement timeout). Owner: devops-cicd.

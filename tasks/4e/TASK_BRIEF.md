@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| State | SPEC_READY |
+| State | IN_REVIEW |
 | Owner role | devops-cicd (build: `.github/workflows/drift.yml`, `scripts/ci/drift-*`, `supabase/production/drift-role.sql`, `roles/devops-cicd.md` Outputs item 5); qa-test (tests: `tests/integration/**`) |
 | Branch | `ci/4e-drift-readonly` |
 | Worktree | `../wt-4e-devops-cicd` |
@@ -387,13 +387,18 @@ Q1 must be answered by the person before step 1 of "After merge"; the build can 
 
 1. **Create the role.** Open Supabase Dashboard > project AutomationTests > SQL Editor. Paste the part of
    `supabase/production/drift-role.sql` above the rollback section and run it. It should finish with no error.
-2. **Set its password.** Make a new password in your password manager (32+ letters and digits). In a new SQL editor
-   query, run the password line described in the file with your password, then close that query without saving it
-   (or follow the Q2 alternative).
+2. **Set its password (security gate G1).** First run `show log_statement;` in the SQL editor and note the answer.
+   If it is `none`: make a new password in your password manager (32+ letters and digits only), and in a new SQL
+   editor query run only the password line described in the file with your password, then close that query without
+   saving it. If it is anything else (`ddl`, `mod`, `all`), don't use the SQL editor for the password: tell the
+   orchestrator first (the alternative is `psql` `password`, or you accept in a decision file that the password may
+   sit in the log). If the password query shows any error, treat that password as logged: make a new one and run it
+   again.
 3. **Store the secret.** Dashboard > Connect > Session pooler: copy the URL, replace the user with
    `drift_reader.<your project ref>` and the password with the new one. GitHub > Settings > Environments > production >
-   Environment secrets > add `SUPABASE_DRIFT_DB_URL` with that URL. Not a repository secret. (Q3: also set the
-   deployment branch policy to `main` only.)
+   Environment secrets > add `SUPABASE_DRIFT_DB_URL` with that URL. Not a repository secret. **Required (security gate G2), before or together with adding the secret:** in the same
+   production environment page, set Deployment branches to `main` only. Until then the "restricted to main" in
+   drift.yml and roles/devops-cicd.md isn't true.
 4. **Run it.** `gh workflow run drift.yml --ref main`, then open the run (`gh run list --workflow drift.yml`).
    **Green looks like:** the run succeeds; the log shows `URL check: session pooler URL for drift_reader (format OK)`,
    `diff: 0 non-comment lines, sha256 e3b0c44298fc` and `No drift.`; no new issue labeled `drift`.
@@ -505,6 +510,13 @@ a shell variable, set via psql stdin; shown below as `<local>`.
 - **Odd (see L4e.2):** with the agent env vars `AI_AGENT` / `CLAUDECODE` set, CLI 3.2.0 `db diff` prints a one-line
   JSON object (`{"diff":"",...}`) instead of SQL even when clean, which `drift-judge.sh` counts as 1 line = drift. The
   numbers above are from runs with `env -u AI_AGENT -u CLAUDECODE`. GitHub Actions doesn't set them.
+
+### orchestrator, 2026-11-27 (gates)
+
+- CI green on ea73293 (run 45986003737: verify, db-check, secrets). qa-test L4e.2 tests: ea73293, 127 passed (127).
+- Security gate PASS (1954524), review APPROVE (c1bc12a). G1/G2 written into "After merge" steps 2-3 above (review R2).
+  G3/R3 (password charset), R1 (older-commit check_run can cancel a pending run), R4 (final check skips rolconfig)
+  tracked as L4e.3 (open). `tasks/4c/live-checks.md` (4c AC29-AC31 results) rides in this PR (R6, in the PR body).
 
 ## Blocked (fill in only when BLOCKED)
 
