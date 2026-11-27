@@ -181,6 +181,25 @@ None: the design above is the person's option A as relayed; nothing widens it.
 - **Next role must know:** the exception is stricter than the coordinator's first sketch (no `push`). "Exactly one
   B2 write grant, `issues`" means a duplicate `issues: write` at job level also loses the exception.
 
+### devops-cicd, 2026-11-27
+
+- **Changed:** `scripts/gate-check.sh`: the awk reader's `W` fact now carries the scope (`W<TAB><line><TAB><scope>`,
+  `write-all` for write-all); new fact `D<TAB>ok|no` from `on:` (scalar, one-line flow sequence with plain or
+  quoted lower-case names, block-mapping keys at the first indent; every name must be in {schedule,
+  workflow_dispatch, check_run}, compared case-sensitively; flow mapping, block sequence, `[]`, no `on:` → `no`).
+  In `spoof_file`, B2 prints the exception line instead of the FAIL only when `$p` is exactly
+  `.github/workflows/drift.yml`, there is exactly one `W` fact with scope `issues`, and `D` is `ok`. The B2 FAIL text
+  and its line number (first B2 grant) are unchanged. Header comment and the reader's fact list updated.
+- **Verified:** `bash -n scripts/gate-check.sh` OK. Reader only (awk program extracted, fed directly, no
+  gate-check run): the 4e drift.yml gives `W 37 issues`, `D ok`, `TP`; `on: [schedule, pull_request]` with
+  `issues` + `checks` write gives two `W` facts and `D no`. No tests, verify.sh or stack run (per instructions).
+- **Left to do:** qa-test writes AC1-AC12 tests in `tests/integration/gate-spoof.test.ts`; then verify.sh,
+  security, review; the person's label after the last `scripts/**` push.
+- **Next role must know:** exception line, matched whole:
+  `  PASS  merge-gate spoofing: .github/workflows/drift.yml: issues: write allowed (decision 2026-11-27-4ea-drift-issues-write-exception.md; triggers schedule/workflow_dispatch/check_run only)`.
+  It is printed even when B1/B3/S14-A FAIL the same file (AC10, AC11). Non-B2 write scopes (`contents: write`,
+  `id-token: write`) don't affect the exception (B2 never read them).
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
