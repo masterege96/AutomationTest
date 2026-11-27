@@ -1,0 +1,11 @@
+name: x
+# TEST ONLY (task 9y, 4c AC30): a PR-defined job named merge-gate. It only sleeps and succeeds.
+on: pull_request
+permissions: {}
+jobs:
+  merge-gate:
+    name: merge-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - run: sleep 60
