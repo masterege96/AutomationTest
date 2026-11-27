@@ -422,6 +422,46 @@ Q1 must be answered by the person before step 1 of "After merge"; the build can 
 - **Next role must know:** the CLI has no `--db-url`; use `--remote=<url>`. Q1 needs the person before the SQL is run.
   The only tests to run on the PC are listed under Scope.
 
+### devops-cicd, 2026-11-27 (contract for qa-test)
+
+Result lines are exactly the brief's texts. Call interface and precisions qa-test can rely on:
+
+- **URL check:** `DRIFT_DB_URL=<url> bash scripts/ci/drift-url-check.sh` (the workflow maps the secret to the env var
+  `DRIFT_DB_URL`, not a `SUPABASE_*` name, so the CLI can't read it as config). All output on stdout. Exit 0 + AC11 line;
+  exit 1 + AC12 line; exit 2 on a bad argument. `<part>` words: `value` (empty, leading/trailing whitespace, CR or LF
+  anywhere; hint `no spaces or line breaks`, empty: `set the session pooler URL`), `scheme`, `user`, `ref`, `password`,
+  `host`, `port`, `database`, `query`. Checked in that order; a space inside the ref gives `ref`. "Missing password" =
+  `drift_reader.<ref>@host` or `drift_reader.<ref>:@host`. "Missing port" = `...pooler.supabase.com/postgres`.
+  "Database missing" = no `/` after the port, or `/` with an empty name.
+- **Masks (AC14):** `--add-masks` runs the same check and, only after it passes, also prints `::add-mask::<password>`,
+  `::add-mask::<ref>`, `::add-mask::<host>` (one line each, after the OK line). AC13 applies to the call without
+  `--add-masks`; with it, the three mask lines are the only lines holding parts. drift.yml calls it with
+  `--add-masks` in the URL-check step, before the diff step.
+- **Judge:** `GITHUB_OUTPUT=<file> bash scripts/ci/drift-judge.sh <cli exit code> <diff.sql path> <cli stderr path>`.
+  Appends `diff_ok=true` then `drift=no|yes` (one per line) only on AC15/AC16. Exit 0 = no drift, 1 = drift or broken,
+  2 = wrong argument count. AC17 code text is the given code (`unknown` if not a number); stderr tail via `tail -n 20`,
+  nothing printed if the stderr file is missing. AC18 reasons: `diff file missing`, `diff path is a directory`,
+  `diff path is not a regular file`, `diff file not readable`, `line count failed` (grep exit >1), `line count is not a
+  number`, `sha256 failed`. Unset `GITHUB_OUTPUT` -> `::error::drift check broken: GITHUB_OUTPUT is not set`, exit 1.
+  Calls `grep`, `sha256sum`, `cut`, `tail` from `PATH`: for AC18(c), put a stub `grep` first on `PATH` that exits 2 or
+  prints `abc` (chmod-unreadable files don't work on Windows). Runs with `LC_ALL=C`.
+- **drift.yml shape:** step ids `head` (check_run head_sha guard, `skip=true` output), `diff` (CLI + judge in one
+  step; so `steps.diff.outputs.drift` / `diff_ok`, upload and issue conditions as on main). Secret env names in steps:
+  `HAS_DRIFT_DB_URL` (require), `DRIFT_DB_URL` (URL check, diff). Diff command:
+  `npx --no-install supabase db diff --remote="$DRIFT_DB_URL" --schema "$DRIFT_SCHEMAS"`.
+- **Role file:** lowercase SQL (repo style, as the migrations): match keywords case-insensitively. No `/* */`
+  comments, no `--` inside strings. The only grant is `grant connect on database postgres to drift_reader`;
+  `statement_timeout = '120s'`.
+
+### devops-cicd, 2026-11-27 (build)
+
+- **Summary:** drift.yml reworked to `drift_reader` via `SUPABASE_DRIFT_DB_URL` (`--remote=`), `check_run` trigger,
+  main-head guard, URL check + masks, broken-vs-drift judge; role file `supabase/production/drift-role.sql`; scripts
+  `scripts/ci/drift-url-check.sh`, `scripts/ci/drift-judge.sh`; `roles/devops-cicd.md` Outputs item 5 only. Static
+  checks only (js-yaml parse, `bash -n`, text greps for AC3/AC4/AC7/AC8/AC10/AC20/AC25); no tests, no verify.sh, no local
+  stack. **Left:** qa-test tests; AC28 (local-stack proof, scheduled separately: also proves AC5 and that
+  `grant connect on database postgres` works as `postgres`); verify.sh summary line. See `tasks/4e/lessons.md` L4e.1.
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
