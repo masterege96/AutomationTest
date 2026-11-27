@@ -200,6 +200,38 @@ None: the design above is the person's option A as relayed; nothing widens it.
   It is printed even when B1/B3/S14-A FAIL the same file (AC10, AC11). Non-B2 write scopes (`contents: write`,
   `id-token: write`) don't affect the exception (B2 never read them).
 
+### qa-test, 2026-11-27
+
+- **Changed:** `tests/integration/gate-spoof.test.ts` (appended only; no existing 4c test changed): three
+  `describe.concurrent` blocks "drift.yml issues: write exception" (happy paths AC1-AC4; abuse AC5-AC8; path and
+  the other rules AC9-AC13), same fixture style (throwaway repo per case, gate-check run on it, label current).
+  AC1 uses a copy of 4e's drift.yml (`origin/ci/4e-drift-readonly` at `dfc6bc5`, 175 lines, sha256 `9aa3063d...`)
+  as an in-file string, so nothing is fetched. AC9's `.github/workflows/Drift.yml` is committed as an index-only
+  blob (core.ignorecase off) so it sits next to `drift.yml` on case-insensitive file systems.
+- **AC -> test:** AC1 "AC1: 4e's drift.yml ..."; AC2 8 forms "AC2: base drift with ..." plus 4 spellings
+  "AC2/AC3 (Definitions)" (flow mapping, `Issues: 'Write'`, job-level flow, with `contents`/`id-token: write`);
+  AC3 "AC3: ... only job"; AC4 two tests (unchanged main drift.yml; comment-only change); AC5 13 triggers
+  (pull_request, pull_request_target, push x3 forms, workflow_run, workflow_call, issue_comment, check_suite,
+  repository_dispatch, made_up_event, `Schedule:`, `Workflow_Dispatch:`); AC6 12 forms (the brief's 6 plus
+  `[Schedule]`, `"Schedule"`, quoted bad item, empty item, empty `on:`, no `on:`); AC7 9 scope cases (5 scopes,
+  checks before issues, flow with statuses, checks instead of issues, write-all) plus a duplicate `issues:` key;
+  AC8 5 job cases (block/flow checks, second issues, two jobs each issues, job write-all); AC9 root drift.yml
+  (no spoof line, PASS) plus 4 wrong paths (sub/, Drift.yml, .yaml, drift2.yml) in one run; AC10 comment and
+  step run (exception line AND exact B1 FAIL); AC11 job id gate, job named gate (S14-A + exception line) and B3
+  (exact B3 FAIL + exception line); AC12 `on: &t [...]`, `on: &t` block, `permissions: &p`, quoted block key
+  `"issues": write` (all "can't be read safely", no exception); AC13 header static test. Abuse cases assert the
+  exact 4c B2 FAIL line with its line number (first B2 grant), no exception line, exit 1.
+- **Verified:** first full-file run (before fixing my one wrong test): `Tests  1 failed | 264 passed (265)` (all 4c
+  tests passed unchanged). After the fix, per the orchestrator, only the new cases:
+  `npx --no-install vitest run tests/integration/gate-spoof.test.ts -t "drift\.yml issues: write exception"` ->
+  `Test Files  1 passed (1)`, `Tests  71 passed | 194 skipped (265)`. GitHub's Linux CI runs the full file.
+  `tsc --noEmit` and `eslint` on the file clean. gate-check.test.ts not run (no shared helper touched).
+  verify.sh and the stack not run (per instructions).
+- **Bugs found:** none in gate-check.sh. One test of mine was wrong and was fixed: a quoted block key
+  `"issues": write` is outside the 4c reader's subset (4c already expects a FAIL for `"checks": write` block), so
+  it is now an AC12 fail-closed case, not a happy path.
+- **Left to do:** verify.sh, security gate, review; the person's label after the last `scripts/**` push.
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**
