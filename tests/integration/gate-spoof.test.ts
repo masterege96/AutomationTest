@@ -1168,7 +1168,10 @@ describe.concurrent("gate-check.sh drift.yml issues: write exception, happy path
     expect(DRIFT_4E).toMatch(/^on:\n {2}schedule:\n/m);
     expect(DRIFT_4E).toMatch(/^ {2}check_run:\n {4}types: \[completed\]\n/m);
     expect(DRIFT_4E).toMatch(/^permissions:\n {2}contents: read\n {2}issues: write\n\n/m);
-    const res = await runDrift(DRIFT_4E);
+    // main gets a different drift.yml, so the head's DRIFT_4E is a protected change even once the repo's own
+    // drift.yml (read into MAIN_FILES) is 4e's: otherwise the fixture has no drift.yml change and no label line.
+    const r = spoofRepo({ [DRIFT]: DRIFT_4E }, { [DRIFT]: baseDrift(ON_SCHEDULE) });
+    const res = await r.run(r.labelNow());
     expectLine(res, LABEL_PASS);
     expectExcPass(res);
   });
