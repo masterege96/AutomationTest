@@ -5,7 +5,8 @@
 - **Who:** the person, in their own words (project thread, 11:46:57 UTC): "approved", replying to the orchestrator's
   open request "your one-line OK in your own words for creating drift_reader. It's needed only before you run the SQL
   after 4e merges." (asked first at 10:20 UTC as: "Do you approve creating the drift_reader role by hand, once, from
-  the reviewed SQL file?").
+  the reviewed SQL file?"). Then, in full (11:47:39 UTC): "I approve creating the drift_reader role in
+  production by hand".
 - **Source:** the project thread
 
 ## Decision
