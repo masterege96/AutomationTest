@@ -938,3 +938,465 @@ describe("gate.yml and gate-check.sh static checks (task 4c AC22, AC23, AC25-AC2
     expect(code).not.toMatch(/\b(python3?|node|npx|jq|yq|perl|ruby)\b/);
   });
 });
+
+// ---------- task 4ea: drift.yml may keep issues: write under B2 ----------
+// Brief: tasks/4ea/TASK_BRIEF.md (Definitions, AC1-AC13); decision
+// tasks/decisions/2026-11-27-4ea-drift-issues-write-exception.md. Same fixture as above (main = this worktree's
+// gate.yml, ci.yml, drift.yml + app/page.tsx; branch ci/9x-demo; label current, so any FAIL is the spoof check).
+// The exception is tied to the exact path .github/workflows/drift.yml, so every drift.yml case gets its own
+// repo and gate-check run (no batching); only the AC9 wrong-path cases share one run.
+
+const DRIFT = ".github/workflows/drift.yml";
+const DRIFT_EXC =
+  "  PASS  merge-gate spoofing: .github/workflows/drift.yml: issues: write allowed (decision 2026-11-27-4ea-drift-issues-write-exception.md; triggers schedule/workflow_dispatch/check_run only)";
+const EXC_ANY = "issues: write allowed";
+
+// AC1 fixture: 4e's .github/workflows/drift.yml, copied from origin/ci/4e-drift-readonly at dfc6bc5
+// (175 lines, LF, sha256 9aa3063d06a115fb66da2265f9b58dac49fab1739dc5d4f03889c94b3cf75468), so the test never fetches.
+const DRIFT_4E = [
+  "name: drift",
+  "",
+  "# Read-only drift check: compares production with a database built from supabase/migrations.",
+  "# Judged on the diff content, not the exit code. Never writes to production.",
+  "#",
+  "# Least privilege (task 4e, L13):",
+  "# - Connects as the login role `drift_reader`, created once by the person from",
+  "#   supabase/production/drift-role.sql in the production Dashboard SQL editor (agents never run it).",
+  "#   Attributes: LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS,",
+  "#   CONNECTION LIMIT 3, default_transaction_read_only = on, a statement_timeout. It has no grants on",
+  "#   objects in the diffed schemas and no table data access (it reads only the catalog).",
+  "# - One secret: SUPABASE_DRIFT_DB_URL, the Supavisor session pooler URL for drift_reader",
+  "#   (postgresql://drift_reader.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres),",
+  "#   stored only as a `production`-environment secret, given only to the require, URL-check and diff steps.",
+  "#   No Supabase access token is used.",
+  "# Triggers: nightly; after each deploy (the `Supabase Preview` check of the `supabase` app completing on",
+  "# main's head commit); manual dispatch. Runs only on main and never checks out PR code.",
+  "# Broken vs drift (S26): a diff the check couldn't read (CLI failure, missing output, unreadable or",
+  "# non-numeric count) is \"drift check broken\": the run fails, no drift issue. Only a complete diff with",
+  "# at least one non-comment line is drift: the run fails and the drift issue is opened or updated.",
+  "on:",
+  "  schedule:",
+  "    - cron: \"17 3 * * *\" # nightly, 03:17 UTC",
+  "  workflow_dispatch:",
+  "    inputs:",
+  "      upload_diff:",
+  "        description: \"Upload the raw diff.sql as a 1-day artifact (public repo: anyone can download it until it is deleted)\"",
+  "        type: boolean",
+  "        default: false",
+  "  # After each deploy (S27): the deploy path is the Supabase GitHub integration, not a workflow, so this",
+  "  # listens for its check run. The workflow file and github.sha always come from main here.",
+  "  check_run:",
+  "    types: [completed]",
+  "",
+  "permissions:",
+  "  contents: read",
+  "  issues: write",
+  "",
+  "jobs:",
+  "  drift:",
+  "    name: drift",
+  "    # Main only. A check_run counts only when it is the Supabase deploy check on a main commit",
+  "    # (any conclusion: a failed deploy can leave production behind main, which is drift).",
+  "    # Otherwise the job is skipped and never enters the `production` environment.",
+  "    if: >-",
+  "      github.ref == 'refs/heads/main' &&",
+  "      (github.event_name != 'check_run' ||",
+  "      (github.event.check_run.app.slug == 'supabase' &&",
+  "      github.event.check_run.name == 'Supabase Preview' &&",
+  "      github.event.check_run.check_suite.head_branch == 'main'))",
+  "    # Secrets live in the GitHub Environment `production`, restricted to main, so PR-branch",
+  "    # workflows can never read them. The person creates the environment and its secret.",
+  "    environment: production",
+  "    # Job-level, not workflow-level (L4e.1): a run whose job the if: above skips never joins the",
+  "    # group, so a skipped PR-commit check_run can never cancel a pending after-deploy run.",
+  "    concurrency:",
+  "      group: drift",
+  "      cancel-in-progress: false",
+  "    runs-on: ubuntu-24.04",
+  "    timeout-minutes: 30",
+  "    env:",
+  "      DRIFT_SCHEMAS: public",
+  "      GITLEAKS_VERSION: 8.30.1 # same pin as ci.yml",
+  "    # Secrets are given only to the steps that need them (not to npm ci or other steps).",
+  "    steps:",
+  "      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1",
+  "        with:",
+  "          persist-credentials: false",
+  "",
+  "      # An after-deploy run judges only main's current commit. head_sha is only compared, never checked out.",
+  "      - name: Only the deploy check of main's head",
+  "        id: head",
+  "        if: github.event_name == 'check_run'",
+  "        env:",
+  "          CHECK_HEAD_SHA: ${{ github.event.check_run.head_sha }}",
+  "          RUN_SHA: ${{ github.sha }}",
+  "        run: |",
+  "          if [ \"$CHECK_HEAD_SHA\" != \"$RUN_SHA\" ]; then",
+  "            CHECK_SHORT=$(printf '%s' \"$CHECK_HEAD_SHA\" | tr -cd '0-9a-f' | cut -c1-12)",
+  "            RUN_SHORT=$(printf '%s' \"$RUN_SHA\" | tr -cd '0-9a-f' | cut -c1-12)",
+  "            echo \"::notice::drift skipped: the deploy check is for $CHECK_SHORT, not main's head $RUN_SHORT; the run for main's head or the nightly run covers it\"",
+  "            echo \"skip=true\" >> \"$GITHUB_OUTPUT\"",
+  "          fi",
+  "",
+  "      - name: Require the drift connection secret",
+  "        if: steps.head.outputs.skip != 'true'",
+  "        env:",
+  "          HAS_DRIFT_DB_URL: ${{ secrets.SUPABASE_DRIFT_DB_URL != '' }}",
+  "        run: |",
+  "          if [ \"$HAS_DRIFT_DB_URL\" != true ]; then",
+  "            echo \"::error::Drift check not configured. Missing GitHub Secret: SUPABASE_DRIFT_DB_URL (production environment)\"",
+  "            exit 1",
+  "          fi",
+  "",
+  "      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0",
+  "        if: steps.head.outputs.skip != 'true'",
+  "        with:",
+  "          node-version-file: .nvmrc",
+  "          cache: npm",
+  "",
+  "      - name: Install (lockfile only; brings the pinned Supabase CLI)",
+  "        if: steps.head.outputs.skip != 'true'",
+  "        run: npm ci",
+  "",
+  "      # Format check without printing any part of the URL (L12), then masks for the password, the ref",
+  "      # and the host, so a part the CLI might print in an error is hidden too.",
+  "      - name: Check the connection URL format and mask its parts",
+  "        if: steps.head.outputs.skip != 'true'",
+  "        env:",
+  "          DRIFT_DB_URL: ${{ secrets.SUPABASE_DRIFT_DB_URL }}",
+  "        run: bash scripts/ci/drift-url-check.sh --add-masks",
+  "",
+  "      - name: supabase db diff against production",
+  "        id: diff",
+  "        if: steps.head.outputs.skip != 'true'",
+  "        env:",
+  "          DRIFT_DB_URL: ${{ secrets.SUPABASE_DRIFT_DB_URL }}",
+  "        run: |",
+  "          # The repo is public: never print the schema diff to the log (S18). CLI errors are shown (masked).",
+  "          set +e",
+  "          # Plain SQL output (L4e.2): CLI 3.2.0 prints JSON when it detects an AI agent (AI_AGENT, CLAUDECODE).",
+  "          # Unset those, and force the documented global flags --agent no and --output-format text.",
+  "          env -u AI_AGENT -u CLAUDECODE npx --no-install supabase db diff --remote=\"$DRIFT_DB_URL\" --schema \"$DRIFT_SCHEMAS\" --agent no --output-format text >diff.sql 2>diff.err",
+  "          CLI_RC=$?",
+  "          set -e",
+  "          # Writes diff_ok=true only for a complete, readable diff (S29), drift=yes only for real drift (S26).",
+  "          bash scripts/ci/drift-judge.sh \"$CLI_RC\" diff.sql diff.err",
+  "",
+  "      # Manual opt-in only (upload_diff=true, the person's choice): the schedule and the default dispatch",
+  "      # never expose the diff. Upload only a complete diff (CLI exit 0, S29) that gitleaks finds clean (S28).",
+  "      # Whoever triggers it must delete the artifact right after downloading.",
+  "      - name: Install gitleaks (pinned, checksum verified; manual opt-in only)",
+  "        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true'",
+  "        run: bash scripts/ci/install-gitleaks.sh \"$GITLEAKS_VERSION\"",
+  "",
+  "      - name: Secret scan of the diff before upload",
+  "        id: scan",
+  "        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true'",
+  "        run: |",
+  "          SCAN_DIR=$(mktemp -d)",
+  "          cp diff.sql \"$SCAN_DIR/\"",
+  "          set +e",
+  "          gitleaks detect --no-git --source \"$SCAN_DIR\" --redact --no-banner --log-level error --exit-code 99 >/dev/null 2>&1",
+  "          RC=$?",
+  "          set -e",
+  "          case \"$RC\" in",
+  "            0) echo \"clean=true\" >> \"$GITHUB_OUTPUT\"; echo \"gitleaks: diff.sql clean\" ;;",
+  "            99) echo \"::error::possible secret in production schema, not uploaded\"; exit 1 ;;",
+  "            *) echo \"::error::gitleaks could not run (exit $RC), diff not uploaded\"; exit 1 ;;",
+  "          esac",
+  "",
+  "      - name: Upload the raw diff (manual opt-in only)",
+  "        if: always() && github.event_name == 'workflow_dispatch' && inputs.upload_diff && steps.diff.outputs.diff_ok == 'true' && steps.scan.outputs.clean == 'true'",
+  "        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2",
+  "        with:",
+  "          name: drift-diff",
+  "          path: diff.sql",
+  "          retention-days: 1",
+  "          if-no-files-found: error",
+  "",
+  "      # Only real drift opens or updates the issue; a broken check never writes drift=yes (S26).",
+  "      - name: Open or update the drift issue",
+  "        if: failure() && steps.diff.outputs.drift == 'yes'",
+  "        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0",
+  "        with:",
+  "          script: |",
+  "            // The repo is public: link to the run, never paste the schema diff into the issue.",
+  "            const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;",
+  "            const body = `Drift check failed: ${run}\\n\\nProduction differs from \\`supabase/migrations\\`. The run log shows only a line count and hash (public repo). To see the diff, the person starts a manual run of this workflow with \\`upload_diff=true\\` (1-day artifact, deleted right after download); db-builder compares it with \\`supabase/migrations\\` locally (rules/database-and-deploy.md rule 7). Agents never connect to production.\\n\\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.`;",
+  "            const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'drift' });",
+  "            if (open.length) {",
+  "              await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });",
+  "            } else {",
+  "              await github.rest.issues.create({ ...context.repo, title: 'Drift: production differs from migrations', labels: ['drift'], body });",
+  "            }",
+].join("\n").concat("\n");
+// "Base drift" (brief): workflow-level contents: read + issues: write, one job without its own permissions, no
+// merge-gate text, the given on:.
+const ON_SCHEDULE = 'on:\n  schedule:\n    - cron: "17 3 * * *"\n';
+const DRIFT_PERMS = "permissions:\n  contents: read\n  issues: write\n";
+const baseDrift = (on: string, perms = DRIFT_PERMS, jobs = job("drift")) => `name: drift\n${on}${perms}jobs:\n${jobs}`;
+// The first non-comment line granting write on a B2 scope (or write-all): the line the B2 FAIL names.
+const B2_RE = /(^|[\s{,"'])(checks|statuses|issues|pull-requests|actions|security-events)["']?\s*:\s*["']?write\b|write-all/i;
+const firstB2 = (text: string) => text.split("\n").findIndex((l) => !/^\s*#/.test(l) && B2_RE.test(l)) + 1;
+const b2Line = (path: string, text: string) => `${spoofFail(path)}${B2} (line ${firstB2(text)})`;
+
+function expectExc(r: Result): void {
+  expect(r.lines.filter((l) => l === DRIFT_EXC), `expected the exception line once in:\n${r.out}`).toHaveLength(1);
+  expectNoLine(r, `${spoofFail(DRIFT)}${B2}`);
+}
+function expectNoExc(r: Result): void {
+  expect(r.lines.some((l) => l.includes(EXC_ANY)), `expected no exception line in:\n${r.out}`).toBe(false);
+}
+// Happy path: exception line, no spoof FAIL at all, spoof PASS line, gate-check: PASS, exit 0.
+function expectExcPass(r: Result): void {
+  expectExc(r);
+  expectNoSpoof(r);
+  expectPass(r);
+}
+// Abuse case: the exact B2 FAIL line for the path (4c text and line number), no exception line, exit 1.
+function expectB2(r: Result, path: string, text: string): void {
+  expect(firstB2(text)).toBeGreaterThan(0);
+  expect(r.lines, r.out).toContain(b2Line(path, text));
+  expectNoExc(r);
+  expectSpoof(r, path, B2);
+}
+const runDrift = (text: string) => runSpoof({ [DRIFT]: text });
+
+describe.concurrent("gate-check.sh drift.yml issues: write exception, happy paths (task 4ea AC1-AC4)", () => {
+  it("AC1: 4e's drift.yml (schedule, workflow_dispatch with inputs, check_run types: [completed]; contents: read, issues: write) -> exception line, no spoof FAIL, spoof PASS, PASS", { timeout: TIMEOUT }, async () => {
+    expect(DRIFT_4E.split("\n")).toHaveLength(176);
+    expect(DRIFT_4E).toMatch(/^on:\n {2}schedule:\n/m);
+    expect(DRIFT_4E).toMatch(/^ {2}check_run:\n {4}types: \[completed\]\n/m);
+    expect(DRIFT_4E).toMatch(/^permissions:\n {2}contents: read\n {2}issues: write\n\n/m);
+    const res = await runDrift(DRIFT_4E);
+    expectLine(res, LABEL_PASS);
+    expectExcPass(res);
+  });
+
+  const ALLOWED: [string, string][] = [
+    ["block mapping schedule: only", ON_SCHEDULE],
+    ["block mapping workflow_dispatch: only", "on:\n  workflow_dispatch:\n"],
+    ["block mapping check_run: only (types: [completed])", "on:\n  check_run:\n    types: [completed]\n"],
+    [
+      "block mapping, all three (workflow_dispatch with inputs:)",
+      `${ON_SCHEDULE}  workflow_dispatch:\n    inputs:\n      upload_diff:\n        type: boolean\n        default: false\n  check_run:\n    types: [completed]\n`,
+    ],
+    ["on: schedule (plain scalar)", "on: schedule\n"],
+    ['on: "workflow_dispatch" (quoted scalar)', 'on: "workflow_dispatch"\n'],
+    ["on: [schedule, workflow_dispatch, check_run]", "on: [schedule, workflow_dispatch, check_run]\n"],
+    ["on: ['schedule', \"check_run\"] (quoted list items)", "on: ['schedule', \"check_run\"]\n"],
+  ];
+  it.each(ALLOWED)("AC2: base drift with %s -> exception line, no spoof FAIL, exit 0", { timeout: TIMEOUT }, async (_n, on) => {
+    expectExcPass(await runDrift(baseDrift(on)));
+  });
+
+  it("AC3: base drift with issues: write on its only job (workflow level { contents: read }) -> exception line, exit 0", { timeout: TIMEOUT }, async () => {
+    const text = baseDrift(ON_SCHEDULE, "permissions: { contents: read }\n", job("drift", "    permissions:\n      issues: write\n"));
+    expectExcPass(await runDrift(text));
+  });
+
+  // "any spelling the 4c reader accepts" (Definitions); non-B2 write scopes don't count either way.
+  const SPELLED: [string, string, string][] = [
+    ["workflow-level flow { contents: read, issues: write }", "permissions: { contents: read, issues: write }\n", job("drift")],
+    ["workflow-level Issues: 'Write' (case, quotes)", "permissions:\n  contents: read\n  Issues: 'Write'\n", job("drift")],
+    ["job-level flow { issues: write }", "permissions: {}\n", job("drift", "    permissions: { issues: write }\n")],
+    ["plus id-token: write and contents: write (not B2 scopes)", "permissions:\n  contents: write\n  id-token: write\n  issues: write\n", job("drift")],
+  ];
+  it.each(SPELLED)("AC2/AC3 (Definitions): base drift with %s -> exception line, exit 0", { timeout: TIMEOUT }, async (_n, perms, jobs) => {
+    expectExcPass(await runDrift(baseDrift(ON_SCHEDULE, perms, jobs)));
+  });
+
+  it("AC4: main's drift.yml unchanged at the head -> no exception line, no B2 FAIL, spoof PASS line, PASS", { timeout: TIMEOUT }, async () => {
+    const r = spoofRepo();
+    const res = await r.run(r.labelNow());
+    expectNoExc(res);
+    expectNoLine(res, spoofFail(DRIFT));
+    expectNoSpoof(res);
+    expectPass(res);
+  });
+
+  it("AC4: main's drift.yml changed only by an added comment line (schedule + workflow_dispatch, issues: write) -> exception line, PASS", { timeout: TIMEOUT }, async () => {
+    expect(WF_DRIFT).toMatch(/^ {2}issues: write$/m);
+    expect(WF_DRIFT).toMatch(/^on:\n {2}schedule:\n/m);
+    const res = await runDrift(`${WF_DRIFT}# a comment line\n`);
+    expectLine(res, LABEL_PASS);
+    expectExcPass(res);
+  });
+});
+
+describe.concurrent("gate-check.sh drift.yml issues: write exception, abuse cases (task 4ea AC5-AC8)", () => {
+  // AC5: base drift (schedule) plus one more trigger key, or a cased name.
+  const TRIGGERS: [string, string][] = [
+    ["pull_request:", `${ON_SCHEDULE}  pull_request:\n`],
+    ["pull_request_target:", `${ON_SCHEDULE}  pull_request_target:\n`],
+    ["push:", `${ON_SCHEDULE}  push:\n`],
+    ["push: { branches: [main] }", `${ON_SCHEDULE}  push: { branches: [main] }\n`],
+    ["push: with block branches: [main]", `${ON_SCHEDULE}  push:\n    branches: [main]\n`],
+    ["workflow_run:", `${ON_SCHEDULE}  workflow_run:\n    workflows: [ci]\n    types: [completed]\n`],
+    ["workflow_call:", `${ON_SCHEDULE}  workflow_call:\n`],
+    ["issue_comment:", `${ON_SCHEDULE}  issue_comment:\n`],
+    ["check_suite:", `${ON_SCHEDULE}  check_suite:\n    types: [completed]\n`],
+    ["repository_dispatch:", `${ON_SCHEDULE}  repository_dispatch:\n`],
+    ["an unknown key made_up_event:", `${ON_SCHEDULE}  made_up_event:\n`],
+    ["Schedule: (case) instead of schedule:", 'on:\n  Schedule:\n    - cron: "17 3 * * *"\n'],
+    ["Workflow_Dispatch: (case) next to schedule:", `${ON_SCHEDULE}  Workflow_Dispatch:\n`],
+  ];
+  it.each(TRIGGERS)("AC5: base drift plus %s -> the B2 FAIL (line n), no exception line, exit 1", { timeout: TIMEOUT }, async (_n, on) => {
+    const text = baseDrift(on);
+    expectB2(await runDrift(text), DRIFT, text);
+  });
+
+  // AC6: list and flow forms, and on: forms the exception doesn't read (fail closed).
+  const FORMS: [string, string][] = [
+    ["on: [schedule, pull_request]", "on: [schedule, pull_request]\n"],
+    ["on: [schedule, push]", "on: [schedule, push]\n"],
+    ["on: pull_request", "on: pull_request\n"],
+    ['on: { schedule: [{ cron: "1 1 * * *" }] } (flow mapping, allowed keys only)', 'on: { schedule: [{ cron: "1 1 * * *" }] }\n'],
+    ["on: with a block sequence - schedule", "on:\n  - schedule\n"],
+    ["on: []", "on: []\n"],
+    ["on: [Schedule] (case)", "on: [Schedule]\n"],
+    ['on: "Schedule" (case, quoted scalar)', 'on: "Schedule"\n'],
+    ['on: [schedule, "pull_request"] (quoted bad item)', 'on: [schedule, "pull_request"]\n'],
+    ["on: [schedule, ] (empty item)", "on: [schedule, ]\n"],
+    ["empty on: (nothing under it)", "on:\n"],
+    ["no on: at all", ""],
+  ];
+  it.each(FORMS)("AC6: base drift with %s -> the B2 FAIL (line n), no exception line, exit 1", { timeout: TIMEOUT }, async (_n, on) => {
+    const text = baseDrift(on);
+    expectB2(await runDrift(text), DRIFT, text);
+  });
+
+  // AC7: another B2 scope at the workflow level (two grants), a single non-issues grant, or write-all.
+  const SCOPES: [string, string][] = [
+    ["checks: write", `${DRIFT_PERMS}  checks: write\n`],
+    ["statuses: write", `${DRIFT_PERMS}  statuses: write\n`],
+    ["pull-requests: write", `${DRIFT_PERMS}  pull-requests: write\n`],
+    ["actions: write", `${DRIFT_PERMS}  actions: write\n`],
+    ["security-events: write", `${DRIFT_PERMS}  security-events: write\n`],
+    ["checks: write listed before issues: write", "permissions:\n  checks: write\n  issues: write\n"],
+    ["flow { contents: read, issues: write, statuses: write }", "permissions: { contents: read, issues: write, statuses: write }\n"],
+    ["checks: write INSTEAD of issues: write (one grant, wrong scope)", "permissions:\n  contents: read\n  checks: write\n"],
+    ["permissions: write-all instead of the mapping", "permissions: write-all\n"],
+  ];
+  it.each(SCOPES)("AC7: base drift with %s -> a FAIL naming drift.yml, no exception line, exit 1", { timeout: TIMEOUT }, async (_n, perms) => {
+    const text = baseDrift(ON_SCHEDULE, perms);
+    const res = await runDrift(text);
+    expectNoExc(res);
+    expectSpoof(res, DRIFT);
+    expect(res.lines, res.out).toContain(b2Line(DRIFT, text));
+  });
+
+  it("AC7: base drift with a second issues: write at the workflow level (duplicate key) -> a FAIL naming drift.yml, no exception line, exit 1", { timeout: TIMEOUT }, async () => {
+    const res = await runDrift(baseDrift(ON_SCHEDULE, `${DRIFT_PERMS}  issues: write\n`));
+    expectNoExc(res);
+    expectSpoof(res, DRIFT);
+  });
+
+  // AC8: the job adds a B2 grant to the workflow-level issues: write.
+  const JOBS: [string, string, string][] = [
+    ["job permissions: block with checks: write", DRIFT_PERMS, job("drift", "    permissions:\n      checks: write\n")],
+    ["job permissions: flow { checks: write }", DRIFT_PERMS, job("drift", "    permissions: { checks: write }\n")],
+    ["job permissions: issues: write again (two issues grants)", DRIFT_PERMS, job("drift", "    permissions:\n      issues: write\n")],
+    [
+      "two jobs, each with issues: write (workflow level contents: read only)",
+      "permissions:\n  contents: read\n",
+      job("a", "    permissions:\n      issues: write\n") + job("b", "    permissions:\n      issues: write\n"),
+    ],
+    ["job permissions: write-all", "permissions:\n  contents: read\n", job("drift", "    permissions: write-all\n")],
+  ];
+  it.each(JOBS)("AC8: base drift with %s -> the B2 FAIL (line n), no exception line, exit 1", { timeout: TIMEOUT }, async (_n, perms, jobs) => {
+    const text = baseDrift(ON_SCHEDULE, perms, jobs);
+    expectB2(await runDrift(text), DRIFT, text);
+  });
+});
+
+describe.concurrent("gate-check.sh drift.yml issues: write exception, path and the other rules (task 4ea AC9-AC13)", () => {
+  it("AC9: 4e's drift.yml content as drift.yml at the repo root (not a workflow file) -> no spoof line for it, no exception line, PASS", { timeout: TIMEOUT }, async () => {
+    const res = await runSpoof({ "drift.yml": DRIFT_4E });
+    expect(res.lines.some((l) => l.startsWith("  FAIL  merge-gate spoofing: drift.yml")), res.out).toBe(false);
+    expectNoExc(res);
+    expectNoSpoof(res);
+    expectPass(res);
+  });
+
+  // One run for the wrong workflow paths. Drift.yml next to drift.yml can't exist on a case-insensitive file system,
+  // so it is committed as an index-only blob (core.ignorecase off in the fixture repo).
+  const WRONG = [".github/workflows/sub/drift.yml", ".github/workflows/Drift.yml", ".github/workflows/drift.yaml", ".github/workflows/drift2.yml"];
+  let wrongRun: Promise<Result> | undefined;
+  const WRONG_RUN = () =>
+    (wrongRun ??= (async () => {
+      const r = new Repo(MAIN_FILES);
+      r.git(["config", "core.ignorecase", "false"]);
+      r.checkout(["-b", BRANCH]);
+      r.commit("feat: feature", { "app/feature.ts": "export const feature = 1;\n" });
+      r.commit("ci: drift copies", Object.fromEntries(WRONG.filter((p) => p !== ".github/workflows/Drift.yml").map((p) => [p, DRIFT_4E])));
+      const blob = r.git(["hash-object", "-w", "--stdin"], DRIFT_4E);
+      r.git(["update-index", "--add", "--cacheinfo", `100644,${blob},.github/workflows/Drift.yml`]);
+      r.git(["commit", "-q", "-m", "ci: Drift.yml"]);
+      r.gates();
+      const tree = r.git(["ls-tree", "-r", "--name-only", "HEAD", ".github/workflows"]).split("\n");
+      for (const p of [...WRONG, DRIFT]) expect(tree).toContain(p);
+      expect(r.git(["rev-parse", `HEAD:${DRIFT}`])).toBe(r.git(["rev-parse", `main:${DRIFT}`]));
+      return r.run(r.labelNow());
+    })());
+  it.each(WRONG)("AC9: 4e's drift.yml content at %s -> the B2 FAIL for that path, no exception line, exit 1", { timeout: TIMEOUT }, async (path) => {
+    expectB2(await WRONG_RUN(), path, DRIFT_4E);
+  });
+
+  const B1_CASES: [string, string][] = [
+    ["a comment", `# reports nothing to merge-gate\n${baseDrift(ON_SCHEDULE)}`],
+    ["a step run:", baseDrift(ON_SCHEDULE, DRIFT_PERMS, "  drift:\n    runs-on: ubuntu-24.04\n    steps:\n      - run: echo merge-gate\n")],
+  ];
+  it.each(B1_CASES)("AC10: base drift with merge-gate in %s -> the exception line AND the B1 FAIL (line n), exit 1", { timeout: TIMEOUT }, async (_n, text) => {
+    const res = await runDrift(text);
+    expectExc(res);
+    expect(res.lines, res.out).toContain(`${spoofFail(DRIFT)}${B1} (line ${lineOf(text, /merge-gate/)})`);
+    expectSpoof(res, DRIFT, B1);
+  });
+
+  it.each([
+    ["job id gate", job("gate"), "job id 'gate' is a reserved check name"],
+    ["job drift named gate", job("drift", "    name: gate\n"), "job 'drift' is named 'gate', a reserved check name"],
+  ])("AC11: base drift with %s -> the S14-A FAIL plus the exception line, exit 1", { timeout: TIMEOUT }, async (_n, jobs, reason) => {
+    const res = await runDrift(baseDrift(ON_SCHEDULE, DRIFT_PERMS, jobs));
+    expectExc(res);
+    expect(res.lines, res.out).toContain(`${spoofFail(DRIFT)}${reason}`);
+    expectSpoof(res, DRIFT, reason);
+  });
+
+  it("AC11: issues: write on job a, job b without permissions, no workflow-level permissions -> the B3 FAIL, exit 1", { timeout: TIMEOUT }, async () => {
+    const res = await runDrift(baseDrift(ON_SCHEDULE, "", job("a", "    permissions:\n      issues: write\n") + job("b")));
+    expect(res.lines, res.out).toContain(`${spoofFail(DRIFT)}${B3} (no workflow-level permissions:, job 'b' has none)`);
+    expectExc(res); // the single issues: write with allowed triggers still gets the exception; B3 fails on its own
+    expectSpoof(res, DRIFT, B3);
+  });
+
+  it.each([
+    ["on: &t [schedule]", "on: &t [schedule]\n"],
+    ["on: &t with a block mapping", 'on: &t\n  schedule:\n    - cron: "17 3 * * *"\n'],
+    ["an anchor on permissions: (&p)", 'on: [schedule]\n', "permissions: &p\n  contents: read\n  issues: write\n"],
+    // A quoted block key is outside the 4c reader's subset (4c: quoted key "checks": write (block)), so no exception.
+    ['a quoted block key "issues": write', ON_SCHEDULE, 'permissions:\n  contents: read\n  "issues": write\n'],
+  ] as [string, string, string?][])("AC12: base drift with %s -> 'can't be read safely' FAIL, no exception line, exit 1", { timeout: TIMEOUT }, async (_n, on, perms) => {
+    const res = await runDrift(baseDrift(on, perms ?? DRIFT_PERMS));
+    expectNoExc(res);
+    expectSpoof(res, DRIFT, UNSAFE);
+  });
+
+  it("AC13: gate-check.sh header states the drift exception (path, single issues: write, allowlist, decision file)", () => {
+    const header = readLF("scripts", "gate-check.sh")
+      .split("\n")
+      .filter((l) => l.startsWith("#"))
+      .join("\n");
+    for (const s of [
+      "Drift exception",
+      ".github/workflows/drift.yml",
+      "issues: write",
+      "schedule, workflow_dispatch or check_run",
+      "tasks/decisions/2026-11-27-4ea-drift-issues-write-exception.md",
+      "push included",
+    ]) {
+      expect(header, s).toContain(s);
+    }
+  });
+});
