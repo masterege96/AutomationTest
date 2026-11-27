@@ -935,3 +935,110 @@ describe("F. least privilege written down (AC26, AC27)", () => {
     for (const s of OLD_SECRETS) expect(ROLE_CONTRACT).not.toContain(s);
   });
 });
+
+describe("L4e.2: JSON instead of SQL (agent detection) is broken, never drift", () => {
+  const FMT = readErr("unexpected output format");
+  const CLI_JSON = '{"diff":"","engine":"pg-delta"}';
+
+  it.each([
+    ["a JSON object line (CLI 3.2.0 in an agent shell)", `${CLI_JSON}\n`],
+    ["a JSON object without a trailing newline", CLI_JSON],
+    ["a JSON array line", '[{"diff":""}]\n'],
+    ["leading blank lines before {", `\n\n   \n${CLI_JSON}\n`],
+    ["leading spaces and tabs before {", ` \t  ${CLI_JSON}\n`],
+    ["leading blank lines and spaces before [", "\n\t\n  []\n"],
+    ["a JSON line with CRLF", `${CLI_JSON}\r\n`],
+    ["CRLF blank lines before a JSON line", `\r\n\r\n${CLI_JSON}\r\n`],
+    ["JSON holding a real-looking diff", '{"diff":"create table public.x (id int);"}\n'],
+  ])("judge: first non-blank line starts with { or [ (%s) -> exit 1, unexpected output format, nothing written", (_l, diff) => {
+    const r = judge({ rc: "0", diff });
+    expect(r.code).toBe(1);
+    expect(lines(r.out)).toEqual([FMT]);
+    expect(r.gh).toBe("");
+    expect(r.gh).not.toMatch(/drift=yes|diff_ok=true/);
+    expect(r.out).not.toContain(DRIFT_ERR);
+    expect(r.out).not.toContain("diff:");
+  });
+
+  it("judge: a SQL diff with a later line starting with { is still normal drift (only the first non-blank line counts)", () => {
+    const diff = "create function public.f() returns json as $$\n{\"a\":1}\n$$ language sql;\n[x]\n";
+    const r = judge({ rc: "0", diff });
+    expect(r.code).toBe(1);
+    const ls = lines(r.out);
+    expect(ls).toHaveLength(2);
+    expect(ls[0]).toMatch(/^diff: 4 non-comment lines, sha256 [0-9a-f]{12}$/);
+    expect(ls[1]).toBe(DRIFT_ERR);
+    expect(r.gh).toBe("diff_ok=true\ndrift=yes\n");
+    expect(r.out).not.toContain(FMT);
+  });
+
+  it("judge: a CLI failure with JSON output is still reported as the CLI failure (exit code first)", () => {
+    const r = judge({ rc: "2", diff: `${CLI_JSON}\n`, err: "boom" });
+    expect(r.code).toBe(1);
+    expect(lines(r.out)).toEqual([cliErr("2"), "boom"]);
+    expect(r.gh).toBe("");
+  });
+
+  it("workflow: the diff command unsets AI_AGENT and CLAUDECODE and passes --agent no --output-format text", () => {
+    const cmd = stepRun(DIFF)
+      .split("\n")
+      .find((l) => /supabase\s+db\s+diff/.test(l) && !l.trimStart().startsWith("#"))!;
+    expect(cmd).toBeDefined();
+    expect(cmd).toMatch(/^env -u AI_AGENT -u CLAUDECODE npx --no-install supabase db diff /);
+    expect(cmd).toContain(' --agent no --output-format text');
+    expect(cmd).toContain('--remote="$DRIFT_DB_URL" --schema "$DRIFT_SCHEMAS"');
+  });
+
+  it("workflow: running the diff step with AI_AGENT/CLAUDECODE set, the CLI gets neither, plus the text-mode flags", () => {
+    const cwd = tempDir("qa4e-diffstep-env-");
+    mkdirSync(join(cwd, "scripts", "ci"), { recursive: true });
+    writeFileSync(join(cwd, "scripts", "ci", "drift-judge.sh"), readFileSync(join(ROOT, "scripts", "ci", "drift-judge.sh")));
+    writeFileSync(join(cwd, "gh_out"), "");
+    const s = stubs({
+      npx: [
+        `printf '%s\n' "$@" > "${posix(join(cwd, "npx-args"))}"`,
+        `env > "${posix(join(cwd, "npx-env"))}"`,
+        `printf 'AI_AGENT=%s\nCLAUDECODE=%s\n' "\${AI_AGENT-<unset>}" "\${CLAUDECODE-<unset>}" > "${posix(join(cwd, "npx-agent"))}"`,
+        "echo '-- nothing'; exit 0",
+      ].join("\n"),
+    });
+    const url = makeUrl();
+    const env = cleanEnv(
+      {
+        DRIFT_DB_URL: url,
+        DRIFT_SCHEMAS: "public",
+        GITHUB_OUTPUT: posix(join(cwd, "gh_out")),
+        AI_AGENT: "claude-code",
+        CLAUDECODE: "1",
+        QA4E_CONTROL: "kept",
+      },
+      s,
+    );
+    const r = runStep(stepRun(DIFF), cwd, env);
+    expect(r.code).toBe(0);
+    expect(readFileSync(join(cwd, "gh_out"), "utf8")).toBe("diff_ok=true\ndrift=no\n");
+    expect(readFileSync(join(cwd, "npx-agent"), "utf8").replace(/\r\n/g, "\n")).toBe(
+      "AI_AGENT=<unset>\nCLAUDECODE=<unset>\n",
+    );
+    const envLines = readFileSync(join(cwd, "npx-env"), "utf8").replace(/\r\n/g, "\n").split("\n");
+    expect(envLines.some((l) => /^AI_AGENT=/.test(l))).toBe(false);
+    expect(envLines.some((l) => /^CLAUDECODE=/.test(l))).toBe(false);
+    // control: the fake npx does see other env vars, so the absence above is the step's env -u.
+    expect(envLines).toContain("QA4E_CONTROL=kept");
+    const args = readFileSync(join(cwd, "npx-args"), "utf8").replace(/\r\n/g, "\n").split("\n");
+    expect(args.slice(0, 11)).toEqual([
+      "--no-install",
+      "supabase",
+      "db",
+      "diff",
+      `--remote=${url}`,
+      "--schema",
+      "public",
+      "--agent",
+      "no",
+      "--output-format",
+      "text",
+    ]);
+    expectNoLeak(r.out, url, []);
+  });
+});
