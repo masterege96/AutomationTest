@@ -179,3 +179,44 @@ artifact, unchanged rules.
 | G3 | Low | `scripts/ci/drift-url-check.sh:56-58`, `:66`, `:78` | `@`, `%` and inner spaces accepted in the password. Acceptable (see above); tighten to `[A-Za-z0-9]` later. | devops-cicd (later task) | No |
 | G4 | Low | `scripts/ci/drift-judge.sh:44-46` | CLI stderr tail can name schema objects (no data, URL parts masked). Accepted by AC17. | - | No |
 | G5 | Info | `specs/4e/` | No threat model for 4e; this gate records the Design answers (a)-(d). | orchestrator (process) | No |
+
+## Round 3 (delta after catch-up merge, 2a9d562), 2026-11-27
+
+- **Role:** security (gate), fresh context. Judged: `git diff dfc6bc5 2a9d562 -- . ':!specs/4ea' ':!tasks/4ea'` and
+  `git show 2a9d562`. HEAD `2a9d562`, merge-base with `origin/main` = `fd13c77`.
+- **0295a56 (catch-up merge, parents `dfc6bc5`, `fd13c77`):** clean. `git diff 0295a56^1 0295a56` is exactly main's
+  4ea change (`scripts/gate-check.sh`, `tests/integration/gate-spoof.test.ts`, two `tasks/decisions/` files,
+  `specs/4ea/**`, `tasks/4ea/**`); `git diff 0295a56^2 0295a56` is exactly 4e's earlier net change. No conflict
+  resolution, no edit inside the merge. 4ea changed no file 4e changes (no protected-path overlap, so no re-label
+  is caused by the merge). `scripts/gate-check.sh` at HEAD is byte-identical to `origin/main` (diff 0 lines).
+- **Net change now (`git diff origin/main...HEAD`):** the 11 files judged in rounds 1-2, unchanged since `dfc6bc5`
+  (`drift.yml` sha256 `9aa3063d...5468` at both `dfc6bc5` and HEAD), plus `tests/integration/gate-spoof.test.ts`
+  (+4/-1 from 2a9d562). Not a protected path, so the label rule's protected net change is unchanged by 2a9d562.
+- **2a9d562, test-only:** AC1 in "drift.yml issues: write exception, happy paths" now builds the fixture with
+  `spoofRepo({ [DRIFT]: DRIFT_4E }, { [DRIFT]: baseDrift(ON_SCHEDULE) })` and runs it with `r.labelNow()` instead
+  of `runDrift(DRIFT_4E)`. Reason confirmed: `MAIN_FILES` reads the checkout's own `drift.yml` (`WF_DRIFT`, line 35),
+  which on this branch (and on main after merge) is 4e's file, so fixture main and head held the same drift.yml, no
+  protected change, and no label line. The fix seeds fixture main with a different drift.yml (base drift, schedule
+  only); the head still holds the unchanged 176-line `DRIFT_4E` (sha256 recorded in the fixture comment equals the
+  real `drift.yml`). Label inputs are the same as `runSpoof` (`labelNow()`: push T1, label T2). Assertions are
+  unchanged and still prove, for 4e's real drift.yml: `LABEL_PASS` line, the exact `DRIFT_EXC` exception line once,
+  no B2 FAIL for drift.yml, no spoof FAIL, spoof PASS line, `gate-check: PASS`, exit 0. Nothing removed or loosened;
+  the head side and every abuse case (AC5-AC13, `runDrift`/`runSpoof` on base-drift variants that differ from main
+  either way) are untouched. Main's drift.yml is only the fixture's base and is never judged. **No weakening.**
+- **Merged state with main's gate-check.sh (run here, scratch clone, test label env only, nothing pushed):**
+  `bash <origin/main:scripts/gate-check.sh> --base main --head 2a9d562 --branch ci/4e-drift-readonly` printed
+  `PASS ... drift.yml: issues: write allowed (decision 2026-11-27-4ea-drift-issues-write-exception.md; ...)`,
+  `PASS merge-gate spoofing: no workflow at the head can report merge-gate`, the label PASS line, and FAIL only for
+  "security-gate.md / review.md was not written after the last code change" (expected: this round and the review
+  re-run fix that). So the real 4e drift.yml passes main's spoof rule B2 exception.
+- **Tests run here:** `npx --no-install vitest run tests/integration/gate-spoof.test.ts
+  tests/integration/drift-workflow.test.ts`: `Test Files 2 passed (2)`, `Tests 392 passed (392)`.
+- **Automated:** `npm audit --audit-level=high`: `found 0 vulnerabilities` (no dependency change). CI on `2a9d562`
+  (REST check-runs): `secrets` success; `verify`, `db-check` in progress at time of writing; `merge-gate` failure
+  (stale gates, expected before this round). Added lines of 2a9d562 hold no secret, ref, host or URL. Supabase
+  advisors: N/A (no schema change, no production access).
+- **Rows:** #13, #14, production access, step-4 condition, 4c spoof rules: unchanged from rounds 1-2 (no change to
+  `drift.yml`, `drift-*.sh`, `drift-role.sql`, `roles/devops-cicd.md`). Findings G1-G5 stand as written.
+- **Label:** 2a9d562 changes no protected path, so the person's `framework-change-approved` label rule is unaffected
+  by it; the label still has to be after the last push that changed the protected net change (agents never add it).
+- **Result: PASS** for HEAD `2a9d562`, provided `verify` and `db-check` finish green (merge-gate requires them anyway).
