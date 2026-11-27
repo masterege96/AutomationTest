@@ -11,6 +11,7 @@
 #   broken:   prints "::error::drift check broken: supabase db diff exited <code>" plus at most the last 20
 #             lines of the CLI's stderr, or "::error::drift check broken: diff output could not be read (<reason>)";
 #             appends nothing, exit 1.
+# A diff whose first non-blank line starts with { or [ (JSON, not SQL) is broken: "unexpected output format".
 # Judged on content, not on the exit code: only a numeric count > 0 of lines that are neither blank nor
 # "--" comments is drift. Uses grep, sha256sum, cut and tail from PATH.
 set -uo pipefail
@@ -50,6 +51,17 @@ fi
 [ ! -d "$DIFF" ] || broken_read "diff path is a directory"
 [ -f "$DIFF" ] || broken_read "diff path is not a regular file"
 [ -r "$DIFF" ] || broken_read "diff file not readable"
+
+# The CLI prints a JSON object instead of SQL in some modes (L4e.2: agent detection). That is not a
+# diff this judge can read: fail closed as broken, never as drift. Pure bash (no grep), first non-blank line only.
+while IFS= read -r LINE || [ -n "$LINE" ]; do
+  LINE="${LINE#"${LINE%%[![:space:]]*}"}"
+  [ -z "$LINE" ] && continue
+  case "$LINE" in
+    "{"* | "["*) broken_read "unexpected output format" ;;
+  esac
+  break
+done <"$DIFF"
 
 # grep -c exits 1 when it selects no line (count 0) and 2 on an error.
 COUNT=$(grep -cvE '^[[:space:]]*(--.*)?$' -- "$DIFF" 2>/dev/null)

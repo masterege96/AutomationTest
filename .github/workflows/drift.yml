@@ -118,7 +118,9 @@ jobs:
         run: |
           # The repo is public: never print the schema diff to the log (S18). CLI errors are shown (masked).
           set +e
-          npx --no-install supabase db diff --remote="$DRIFT_DB_URL" --schema "$DRIFT_SCHEMAS" >diff.sql 2>diff.err
+          # Plain SQL output (L4e.2): CLI 3.2.0 prints JSON when it detects an AI agent (AI_AGENT, CLAUDECODE).
+          # Unset those, and force the documented global flags --agent no and --output-format text.
+          env -u AI_AGENT -u CLAUDECODE npx --no-install supabase db diff --remote="$DRIFT_DB_URL" --schema "$DRIFT_SCHEMAS" --agent no --output-format text >diff.sql 2>diff.err
           CLI_RC=$?
           set -e
           # Writes diff_ok=true only for a complete, readable diff (S29), drift=yes only for real drift (S26).

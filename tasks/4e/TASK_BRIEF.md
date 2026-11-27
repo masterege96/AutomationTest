@@ -442,7 +442,9 @@ Result lines are exactly the brief's texts. Call interface and precisions qa-tes
   2 = wrong argument count. AC17 code text is the given code (`unknown` if not a number); stderr tail via `tail -n 20`,
   nothing printed if the stderr file is missing. AC18 reasons: `diff file missing`, `diff path is a directory`,
   `diff path is not a regular file`, `diff file not readable`, `line count failed` (grep exit >1), `line count is not a
-  number`, `sha256 failed`. Unset `GITHUB_OUTPUT` -> `::error::drift check broken: GITHUB_OUTPUT is not set`, exit 1.
+  number`, `sha256 failed`, `unexpected output format` (first non-blank line of diff.sql starts with `{` or `[`,
+  after leading whitespace: the CLI's JSON form, L4e.2; checked in pure bash before the count, so a `grep` stub
+  doesn't reach it). Unset `GITHUB_OUTPUT` -> `::error::drift check broken: GITHUB_OUTPUT is not set`, exit 1.
   Calls `grep`, `sha256sum`, `cut`, `tail` from `PATH`: for AC18(c), put a stub `grep` first on `PATH` that exits 2 or
   prints `abc` (chmod-unreadable files don't work on Windows). Runs with `LC_ALL=C`.
 - **drift.yml shape:** step ids `head` (check_run head_sha guard, `skip=true` output), `diff` (CLI + judge in one
@@ -465,6 +467,7 @@ Result lines are exactly the brief's texts. Call interface and precisions qa-tes
   `grant connect on database postgres` works as `postgres`); verify.sh summary line. See `tasks/4e/lessons.md` L4e.1.
 
 - orchestrator decision 2026-11-27: concurrency moved to job level, L4e.1
+- orchestrator decision 2026-11-27: L4e.2 fixed both ends, fail closed: the diff step runs the CLI with `AI_AGENT`/`CLAUDECODE` unset and `--agent no --output-format text`; the judge reports JSON output as broken (`unexpected output format`).
 
 - **qa-test, 2026-11-27:** added `tests/integration/drift-workflow.test.ts` (114 tests: static AC1-AC10, AC14, AC19-AC27, AC29 incl. job-level concurrency; executed URL check AC11-AC13 + abuse, judge AC15-AC18 + GITHUB_OUTPUT injection, and drift.yml's head/require/diff `run:` blocks with fake npx/grep/sha256sum stubs); `npx --no-install vitest run` on it: `Tests  114 passed (114)`, `gate-spoof.test.ts`: `Tests  194 passed (194)`; no code bugs found; not covered here: AC5 runtime, AC28, AC30-AC33, AC1/AC27 "unchanged vs main" (need git history), AC18 "diff file not readable" (chmod doesn't work on Windows).
 

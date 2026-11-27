@@ -20,12 +20,18 @@ Also: the role file re-applies only the attributes a non-superuser role owner ma
 doesn't change, so the others are set only at creation and asserted by the final check. AC28 should confirm on the
 local stack that a second run succeeds as `postgres`.
 
-## L4e.2. The Supabase CLI prints JSON instead of SQL when it detects an AI agent (open)
+## L4e.2. The Supabase CLI prints JSON instead of SQL when it detects an AI agent (fixed in 4e)
 
 In AC28, CLI 3.2.0 `supabase db diff --remote=... --schema public` run from an agent shell (env vars `AI_AGENT` and
 `CLAUDECODE` set) wrote a one-line JSON object to stdout (`{"diff":"","engine":"pg-delta",...}`) even on a clean DB.
 `drift-judge.sh` counts non-comment lines, so that clean result reads as 1 line = drift. With both vars unset the
 CLI prints plain SQL (empty when clean). GitHub Actions doesn't set them, so drift.yml is not affected today, but any
 agent that runs the diff locally (and any future CLI that switches on other signals, such as `CI`) gets a false
-drift. Options for a later task: run the CLI with those vars unset or with an explicit output flag in drift.yml, or
-let the judge recognise the JSON form. Not fixed in 4e (out of AC28's scope).
+drift.
+
+Fixed in 4e (orchestrator decision 2026-11-27), both ends, fail closed: the drift.yml diff step runs
+`env -u AI_AGENT -u CLAUDECODE npx --no-install supabase db diff ... --agent no --output-format text` (both global
+flags are documented in CLI 3.2.0 `supabase db diff --help`: `--agent <auto|yes|no>` overrides agent detection,
+`--output-format <text|json|stream-json>`); and `scripts/ci/drift-judge.sh` treats a diff whose first non-blank line
+starts with `{` or `[` as "drift check broken: diff output could not be read (unexpected output format)", exit 1,
+never `drift=yes`. Whether the flags alone give SQL is unproven until the next local or live run; the judge covers it.
