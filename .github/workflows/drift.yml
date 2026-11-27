@@ -2,6 +2,22 @@ name: drift
 
 # Read-only drift check: compares production with a database built from supabase/migrations.
 # Judged on the diff content, not the exit code. Never writes to production.
+#
+# Least privilege (task 4e, L13):
+# - Connects as the login role `drift_reader`, created once by the person from
+#   supabase/production/drift-role.sql in the production Dashboard SQL editor (agents never run it).
+#   Attributes: LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS,
+#   CONNECTION LIMIT 3, default_transaction_read_only = on, a statement_timeout. It has no grants on
+#   objects in the diffed schemas and no table data access (it reads only the catalog).
+# - One secret: SUPABASE_DRIFT_DB_URL, the Supavisor session pooler URL for drift_reader
+#   (postgresql://drift_reader.<ref>:<password>@aws-<n>-<region>.pooler.supabase.com:5432/postgres),
+#   stored only as a `production`-environment secret, given only to the require, URL-check and diff steps.
+#   No Supabase access token is used.
+# Triggers: nightly; after each deploy (the `Supabase Preview` check of the `supabase` app completing on
+# main's head commit); manual dispatch. Runs only on main and never checks out PR code.
+# Broken vs drift (S26): a diff the check couldn't read (CLI failure, missing output, unreadable or
+# non-numeric count) is "drift check broken": the run fails, no drift issue. Only a complete diff with
+# at least one non-comment line is drift: the run fails and the drift issue is opened or updated.
 on:
   schedule:
     - cron: "17 3 * * *" # nightly, 03:17 UTC
@@ -11,7 +27,10 @@ on:
         description: "Upload the raw diff.sql as a 1-day artifact (public repo: anyone can download it until it is deleted)"
         type: boolean
         default: false
-  # After each deploy: add a workflow_run trigger on the deploy workflow once the deploy path exists.
+  # After each deploy (S27): the deploy path is the Supabase GitHub integration, not a workflow, so this
+  # listens for its check run. The workflow file and github.sha always come from main here.
+  check_run:
+    types: [completed]
 
 permissions:
   contents: read
@@ -24,8 +43,17 @@ concurrency:
 jobs:
   drift:
     name: drift
+    # Main only. A check_run counts only when it is the Supabase deploy check on a main commit
+    # (any conclusion: a failed deploy can leave production behind main, which is drift).
+    # Otherwise the job is skipped and never enters the `production` environment.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'check_run' ||
+      (github.event.check_run.app.slug == 'supabase' &&
+      github.event.check_run.name == 'Supabase Preview' &&
+      github.event.check_run.check_suite.head_branch == 'main'))
     # Secrets live in the GitHub Environment `production`, restricted to main, so PR-branch
-    # workflows can never read them. The person creates the environment and its secrets.
+    # workflows can never read them. The person creates the environment and its secret.
     environment: production
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -38,60 +66,62 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Require the production connection secrets
+      # An after-deploy run judges only main's current commit. head_sha is only compared, never checked out.
+      - name: Only the deploy check of main's head
+        id: head
+        if: github.event_name == 'check_run'
         env:
-          HAS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
-          HAS_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD != '' }}
-          HAS_PROJECT: ${{ secrets.SUPABASE_PROJECT_ID != '' }}
+          CHECK_HEAD_SHA: ${{ github.event.check_run.head_sha }}
+          RUN_SHA: ${{ github.sha }}
         run: |
-          missing=""
-          [ "$HAS_TOKEN" = true ] || missing="$missing SUPABASE_ACCESS_TOKEN"
-          [ "$HAS_PASSWORD" = true ] || missing="$missing SUPABASE_DB_PASSWORD"
-          [ "$HAS_PROJECT" = true ] || missing="$missing SUPABASE_PROJECT_ID"
-          if [ -n "$missing" ]; then
-            echo "::error::Drift check not configured. Missing GitHub Secrets:$missing"
+          if [ "$CHECK_HEAD_SHA" != "$RUN_SHA" ]; then
+            CHECK_SHORT=$(printf '%s' "$CHECK_HEAD_SHA" | tr -cd '0-9a-f' | cut -c1-12)
+            RUN_SHORT=$(printf '%s' "$RUN_SHA" | tr -cd '0-9a-f' | cut -c1-12)
+            echo "::notice::drift skipped: the deploy check is for $CHECK_SHORT, not main's head $RUN_SHORT; the run for main's head or the nightly run covers it"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require the drift connection secret
+        if: steps.head.outputs.skip != 'true'
+        env:
+          HAS_DRIFT_DB_URL: ${{ secrets.SUPABASE_DRIFT_DB_URL != '' }}
+        run: |
+          if [ "$HAS_DRIFT_DB_URL" != true ]; then
+            echo "::error::Drift check not configured. Missing GitHub Secret: SUPABASE_DRIFT_DB_URL (production environment)"
             exit 1
           fi
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.head.outputs.skip != 'true'
         with:
           node-version-file: .nvmrc
           cache: npm
 
       - name: Install (lockfile only; brings the pinned Supabase CLI)
+        if: steps.head.outputs.skip != 'true'
         run: npm ci
 
-      - name: Link the production project (read-only use)
+      # Format check without printing any part of the URL (L12), then masks for the password, the ref
+      # and the host, so a part the CLI might print in an error is hidden too.
+      - name: Check the connection URL format and mask its parts
+        if: steps.head.outputs.skip != 'true'
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
-        run: npx --no-install supabase link --project-ref "$SUPABASE_PROJECT_ID" # expects SUPABASE_DB_PASSWORD from env (confirm on the first run)
+          DRIFT_DB_URL: ${{ secrets.SUPABASE_DRIFT_DB_URL }}
+        run: bash scripts/ci/drift-url-check.sh --add-masks
 
       - name: supabase db diff against production
         id: diff
+        if: steps.head.outputs.skip != 'true'
         env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          DRIFT_DB_URL: ${{ secrets.SUPABASE_DRIFT_DB_URL }}
         run: |
-          set -o pipefail
-          # The repo is public: never print the schema diff to the log (S18). CLI errors are shown (secrets are masked).
-          if ! npx --no-install supabase db diff --remote --schema "$DRIFT_SCHEMAS" >diff.sql 2>diff.err; then
-            echo "::error::supabase db diff did not run"; tail -20 diff.err; exit 1
-          fi
-          # The CLI exited 0, so diff.sql is complete (S29: only a complete diff may be uploaded).
-          echo "diff_ok=true" >> "$GITHUB_OUTPUT"
-          # Judge on content: anything other than blank lines and SQL comments is drift.
-          CHANGED_LINES=$(grep -cvE '^[[:space:]]*(--.*)?$' diff.sql || true)
-          echo "diff: $CHANGED_LINES non-comment lines, sha256 $(sha256sum diff.sql | cut -c1-12)"
-          # Pass only on an exact "0"; anything else (non-empty diff, odd output) is treated as drift (fails closed).
-          if [ "$CHANGED_LINES" != "0" ]; then
-            echo "drift=yes" >> "$GITHUB_OUTPUT"
-            echo "::error::Drift: production differs from supabase/migrations"
-            exit 1
-          fi
-          echo "drift=no" >> "$GITHUB_OUTPUT"
-          echo "No drift."
+          # The repo is public: never print the schema diff to the log (S18). CLI errors are shown (masked).
+          set +e
+          npx --no-install supabase db diff --remote="$DRIFT_DB_URL" --schema "$DRIFT_SCHEMAS" >diff.sql 2>diff.err
+          CLI_RC=$?
+          set -e
+          # Writes diff_ok=true only for a complete, readable diff (S29), drift=yes only for real drift (S26).
+          bash scripts/ci/drift-judge.sh "$CLI_RC" diff.sql diff.err
 
       # Manual opt-in only (upload_diff=true, the person's choice): the schedule and the default dispatch
       # never expose the diff. Upload only a complete diff (CLI exit 0, S29) that gitleaks finds clean (S28).
@@ -125,6 +155,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      # Only real drift opens or updates the issue; a broken check never writes drift=yes (S26).
       - name: Open or update the drift issue
         if: failure() && steps.diff.outputs.drift == 'yes'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -132,7 +163,7 @@ jobs:
           script: |
             // The repo is public: link to the run, never paste the schema diff into the issue.
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = `Drift check failed: ${run}\n\nProduction differs from \`supabase/migrations\`. The run log shows only a line count and hash (public repo); db-builder reproduces the diff locally with the read-only \`supabase db diff --remote\` (rules/database-and-deploy.md rule 7).\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.`;
+            const body = `Drift check failed: ${run}\n\nProduction differs from \`supabase/migrations\`. The run log shows only a line count and hash (public repo). To see the diff, the person starts a manual run of this workflow with \`upload_diff=true\` (1-day artifact, deleted right after download); db-builder compares it with \`supabase/migrations\` locally (rules/database-and-deploy.md rule 7). Agents never connect to production.\n\nAll deploys stop until this is fixed (ORCHESTRATOR stop rule 1). Owner: db-builder.`;
             const { data: open } = await github.rest.issues.listForRepo({ ...context.repo, state: 'open', labels: 'drift' });
             if (open.length) {
               await github.rest.issues.createComment({ ...context.repo, issue_number: open[0].number, body });
