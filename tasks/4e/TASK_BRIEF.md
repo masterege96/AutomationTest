@@ -468,6 +468,41 @@ Result lines are exactly the brief's texts. Call interface and precisions qa-tes
 
 - **qa-test, 2026-11-27:** added `tests/integration/drift-workflow.test.ts` (114 tests: static AC1-AC10, AC14, AC19-AC27, AC29 incl. job-level concurrency; executed URL check AC11-AC13 + abuse, judge AC15-AC18 + GITHUB_OUTPUT injection, and drift.yml's head/require/diff `run:` blocks with fake npx/grep/sha256sum stubs); `npx --no-install vitest run` on it: `Tests  114 passed (114)`, `gate-spoof.test.ts`: `Tests  194 passed (194)`; no code bugs found; not covered here: AC5 runtime, AC28, AC30-AC33, AC1/AC27 "unchanged vs main" (need git history), AC18 "diff file not readable" (chmod doesn't work on Windows).
 
+### devops-cicd, 2026-11-27 (AC28 + AC5, local stack only)
+
+Local stack `AutomationTest` (container `supabase_db_AutomationTest`, 127.0.0.1:55422), CLI 3.2.0, no reset, no
+production. `drift_reader` password: random 48 hex chars generated at run time (`openssl rand -hex 24`), held only in
+a shell variable, set via psql stdin; shown below as `<local>`.
+
+- **AC5:** `docker exec -i supabase_db_AutomationTest psql -U postgres -d postgres -v ON_ERROR_STOP=1 < supabase/production/drift-role.sql`
+  run twice: exit 0 both times (output `DO, ALTER ROLE x3, GRANT, DO`); role row identical after both runs
+  (`login, no super/createdb/createrole/inherit/replication/bypassrls, connlimit 3,
+  {default_transaction_read_only=on,statement_timeout=120s}`), database ACL gains only `drift_reader=c/postgres`.
+  `grant connect on database postgres` works as `postgres`. No change to the role file needed.
+- **AC28 diffs:** `npx --no-install supabase db diff --remote="postgresql://<user>:<local>@127.0.0.1:55422/postgres" --schema public`
+  as `postgres` and as `drift_reader`, all exit 0 (non-comment lines / sha256 prefix):
+  clean: 0 / `e3b0c44298fc` for both (identical, empty); drift (local probe: `create table public.zz_drift_probe` + RLS +
+  `grant select ... to authenticated`, `alter policy todos_select_own ... to authenticated, anon`,
+  `alter default privileges for role postgres in schema public grant select on sequences to anon`): 15 / `143a34b3afd2`
+  for both (identical, non-empty, shows all three changes); after undoing the probe by hand (drop table, policy back
+  to `authenticated`, revoke the default privilege): 0 / `e3b0c44298fc` for both. So `drift_reader` sees the same as
+  `postgres`; no grant needed (AC3 holds). `drift-judge.sh` on the clean / drift outputs: `drift=no` exit 0 /
+  `drift=yes` exit 1.
+- **AC28 abuse (as `drift_reader`, psql over TCP in the container):** `create table public.x(id int)` ->
+  `ERROR:  cannot execute CREATE TABLE in a read-only transaction`; insert / update on `public.todos` ->
+  `cannot execute INSERT|UPDATE in a read-only transaction`; `select count(*) from public.todos` ->
+  `ERROR:  permission denied for table todos`. With `set default_transaction_read_only = off` first (separate
+  statement): create -> `ERROR:  permission denied for schema public`; insert / update / select ->
+  `ERROR:  permission denied for table todos`. All exit 1.
+- **Cleanup:** probe removed; the rollback section's three lines (uncommented) run locally: exit 0
+  (`REVOKE`, `DROP ROLE`), so `drift_reader` no longer exists locally. Snapshot of public default ACLs, policies,
+  relations/ACLs, the role and the database ACL: identical before and after (sha256 `af2eb0f59fc7`).
+  `supabase db diff --local --schema public`: exit 0, 0 lines. Instead of AC28's "then the local DB is reset", the
+  probe was undone by hand (no reset on the shared stack, orchestrator instruction).
+- **Odd (see L4e.2):** with the agent env vars `AI_AGENT` / `CLAUDECODE` set, CLI 3.2.0 `db diff` prints a one-line
+  JSON object (`{"diff":"",...}`) instead of SQL even when clean, which `drift-judge.sh` counts as 1 line = drift. The
+  numbers above are from runs with `env -u AI_AGENT -u CLAUDECODE`. GitHub Actions doesn't set them.
+
 ## Blocked (fill in only when BLOCKED)
 
 - **Missing:**

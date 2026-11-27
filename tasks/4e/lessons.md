@@ -19,3 +19,13 @@ Also: the role file re-applies only the attributes a non-superuser role owner ma
 (and `noreplication` / `nobypassrls` without those attributes) is refused for a non-superuser even when the value
 doesn't change, so the others are set only at creation and asserted by the final check. AC28 should confirm on the
 local stack that a second run succeeds as `postgres`.
+
+## L4e.2. The Supabase CLI prints JSON instead of SQL when it detects an AI agent (open)
+
+In AC28, CLI 3.2.0 `supabase db diff --remote=... --schema public` run from an agent shell (env vars `AI_AGENT` and
+`CLAUDECODE` set) wrote a one-line JSON object to stdout (`{"diff":"","engine":"pg-delta",...}`) even on a clean DB.
+`drift-judge.sh` counts non-comment lines, so that clean result reads as 1 line = drift. With both vars unset the
+CLI prints plain SQL (empty when clean). GitHub Actions doesn't set them, so drift.yml is not affected today, but any
+agent that runs the diff locally (and any future CLI that switches on other signals, such as `CI`) gets a false
+drift. Options for a later task: run the CLI with those vars unset or with an explicit output flag in drift.yml, or
+let the judge recognise the JSON form. Not fixed in 4e (out of AC28's scope).
