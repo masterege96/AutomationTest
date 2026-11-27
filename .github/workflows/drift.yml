@@ -36,10 +36,6 @@ permissions:
   contents: read
   issues: write
 
-concurrency:
-  group: drift
-  cancel-in-progress: false
-
 jobs:
   drift:
     name: drift
@@ -55,6 +51,11 @@ jobs:
     # Secrets live in the GitHub Environment `production`, restricted to main, so PR-branch
     # workflows can never read them. The person creates the environment and its secret.
     environment: production
+    # Job-level, not workflow-level (L4e.1): a run whose job the if: above skips never joins the
+    # group, so a skipped PR-commit check_run can never cancel a pending after-deploy run.
+    concurrency:
+      group: drift
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:

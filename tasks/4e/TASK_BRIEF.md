@@ -446,7 +446,9 @@ Result lines are exactly the brief's texts. Call interface and precisions qa-tes
   Calls `grep`, `sha256sum`, `cut`, `tail` from `PATH`: for AC18(c), put a stub `grep` first on `PATH` that exits 2 or
   prints `abc` (chmod-unreadable files don't work on Windows). Runs with `LC_ALL=C`.
 - **drift.yml shape:** step ids `head` (check_run head_sha guard, `skip=true` output), `diff` (CLI + judge in one
-  step; so `steps.diff.outputs.drift` / `diff_ok`, upload and issue conditions as on main). Secret env names in steps:
+  step; so `steps.diff.outputs.drift` / `diff_ok`, upload and issue conditions as on main). `concurrency: {group: drift,
+  cancel-in-progress: false}` is on the `drift` job, not at workflow level (orchestrator decision 2026-11-27, L4e.1;
+  replaces AC24 for that point): test for it under `jobs.drift`, and for no top-level `concurrency:`. Secret env names in steps:
   `HAS_DRIFT_DB_URL` (require), `DRIFT_DB_URL` (URL check, diff). Diff command:
   `npx --no-install supabase db diff --remote="$DRIFT_DB_URL" --schema "$DRIFT_SCHEMAS"`.
 - **Role file:** lowercase SQL (repo style, as the migrations): match keywords case-insensitively. No `/* */`
@@ -461,6 +463,8 @@ Result lines are exactly the brief's texts. Call interface and precisions qa-tes
   checks only (js-yaml parse, `bash -n`, text greps for AC3/AC4/AC7/AC8/AC10/AC20/AC25); no tests, no verify.sh, no local
   stack. **Left:** qa-test tests; AC28 (local-stack proof, scheduled separately: also proves AC5 and that
   `grant connect on database postgres` works as `postgres`); verify.sh summary line. See `tasks/4e/lessons.md` L4e.1.
+
+- orchestrator decision 2026-11-27: concurrency moved to job level, L4e.1
 
 ## Blocked (fill in only when BLOCKED)
 
