@@ -74,6 +74,15 @@
 #     statuses (post a check run / commit status), issues, pull-requests (add the person's label),
 #     actions (re-run the gate) or security-events (upload results shown as a check). These token
 #     write scopes are how a workflow without stored secrets changes the gate's result or inputs.
+#     Drift exception (task 4ea; decision tasks/decisions/2026-11-27-4ea-drift-issues-write-exception.md):
+#     no B2 FAIL, one PASS line instead, only when the path is exactly .github/workflows/drift.yml
+#     (no other path or case, not .yaml), the file's only B2 write grant is a single issues: write
+#     (workflow or job level; any other scope, write-all or a second grant -> FAIL), and every trigger
+#     in on: is schedule, workflow_dispatch or check_run (read as a scalar, a one-line flow sequence
+#     or block-mapping keys; anything else, push included, a flow mapping, a block sequence, an empty
+#     or missing on: -> no exception). Safe because the gate counts the label only from the owner's
+#     User 'labeled' events (a bot label never counts) and these triggers never run PR code. Residual:
+#     a writer can workflow_dispatch a branch's copy (writers can push anyway). B1, B3, S14-A still apply.
 #   B3 (changed files): permissions: at the workflow level, or on every job (else the repo default
 #     applies, which may include checks/statuses write).
 #   Fail closed: the reader is a strict line-based subset of YAML (block mappings/sequences
@@ -270,8 +279,9 @@ fi
 # merge-gate spoofing (task 4c, S14; header). The awk reader prints facts, one per line:
 #   U<TAB><line><TAB><why>  file can't be read safely (nothing else is printed)
 #   A<TAB><reason>          S14-A: reserved job id / name, or an expression in a job name
-#   W<TAB><line>            B2: checks/statuses write or write-all
+#   W<TAB><line><TAB><scope> B2: a write grant on a B2 scope, or <scope> = write-all
 #   T<TAB>prt|other         pull_request_target is the only trigger, or not
+#   D<TAB>ok|no             every trigger is schedule, workflow_dispatch or check_run (task 4ea), or not
 #   TP                      workflow-level permissions: present
 #   NP<TAB><job id>         a job without its own permissions:
 read -r -d '' SPOOF_AWK <<'AWK'
@@ -345,13 +355,13 @@ function permlevel(k, v) {
   if (v != "read" && v != "write" && v != "none") unsafe("permissions: unknown level for '" k "'")
   # B2 scopes: checks/statuses post a check; issues/pull-requests can add the person's label;
   # actions can re-run the gate; security-events can upload results shown as a check (security F1, F3).
-  if (v == "write" && (k == "checks" || k == "statuses" || k == "issues" || k == "pull-requests" || k == "actions" || k == "security-events")) print "W\t" NR
+  if (v == "write" && (k == "checks" || k == "statuses" || k == "issues" || k == "pull-requests" || k == "actions" || k == "security-events")) print "W\t" NR "\t" k
 }
 function permval(col,    v, parts, np, i, p, kk, vv) {
   if (VK == "E") { inperm = 1; permparent = col; permcind = 0; permcount = 0; return }
   if (VK == "P" || VK == "S" || (VK == "D" && !VBS)) {
     v = tolower(trim(VV))
-    if (v == "write-all") print "W\t" NR
+    if (v == "write-all") print "W\t" NR "\twrite-all"
     else if (v != "read-all") unsafe("permissions: value is not read-all, write-all or a mapping")
     return
   }
@@ -373,12 +383,27 @@ function endperm() {
   if (inperm && permcount == 0) unsafe("empty permissions:")
   inperm = 0
 }
-function onval(    v) {
-  ONMODE = "other"
-  if (VK == "E") { inon = 1; onind = 0; oncount = 0; onprt = 0; onother = 0; ONMODE = "block"; return }
-  if (VK == "P" || VK == "S" || (VK == "D" && !VBS)) { if (trim(VV) == "pull_request_target") ONMODE = "prt"; return }
+# DMODE (task 4ea, drift exception): "ok" only when every trigger is in DOK (events GitHub runs from
+# the default branch's file, or that only a writer can start). Fail closed: flow mappings, block
+# sequences, empty lists, unknown or differently cased names, no on: at all -> "no".
+function onval(    v, parts, np, i, p) {
+  ONMODE = "other"; DMODE = "no"
+  if (VK == "E") { inon = 1; onind = 0; oncount = 0; onprt = 0; onother = 0; ondbad = 0; ONMODE = "block"; DMODE = "block"; return }
+  if (VK == "P" || VK == "S" || (VK == "D" && !VBS)) {
+    if (trim(VV) == "pull_request_target") ONMODE = "prt"
+    if (trim(VV) in DOK) DMODE = "ok"
+    return
+  }
   if (VK == "F" && substr(VV, 1, 1) == "[") {
     v = trim(substr(VV, 2, length(VV) - 2)); if (v == "pull_request_target") ONMODE = "prt"
+    if (v == "") return
+    np = split(v, parts, ",")
+    for (i = 1; i <= np; i++) {
+      p = trim(parts[i])
+      if (p ~ /^"[a-z_]+"$/ || p ~ /^'[a-z_]+'$/) p = substr(p, 2, length(p) - 2)
+      if (!(p in DOK)) return
+    }
+    DMODE = "ok"
   }
 }
 function jobname(    n) {
@@ -388,7 +413,8 @@ function jobname(    n) {
   n = tolower(trim(VV))
   if (n in R) print "A\tjob '" curjob "' is named '" n "', a reserved check name"
 }
-BEGIN { CR = "\r"; TAB = "\t"; BOM = "\357\273\277"; DQ = "\""; SQ = "'"; R["merge-gate"] = 1; R["gate"] = 1; ONMODE = "other" }
+BEGIN { CR = "\r"; TAB = "\t"; BOM = "\357\273\277"; DQ = "\""; SQ = "'"; R["merge-gate"] = 1; R["gate"] = 1; ONMODE = "other"
+  DOK["schedule"] = 1; DOK["workflow_dispatch"] = 1; DOK["check_run"] = 1; DMODE = "no" }
 {
   line = $0
   if (NR == 1 && substr(line, 1, 3) == BOM) line = substr(line, 4)
@@ -456,8 +482,8 @@ BEGIN { CR = "\r"; TAB = "\t"; BOM = "\357\273\277"; DQ = "\""; SQ = "'"; R["mer
     if (onind == 0) onind = ind
     if (ind < onind) unsafe("bad indentation under on:")
     if (ind == onind) {
-      if (seq || !iskey) onother = 1
-      else { oncount++; if (key == "pull_request_target") onprt = 1 }
+      if (seq || !iskey) { onother = 1; ondbad = 1 }
+      else { oncount++; if (key == "pull_request_target") onprt = 1; if (!(key in DOK)) ondbad = 1 }
     }
     next
   }
@@ -492,6 +518,8 @@ END {
   if (bad) exit
   if (ONMODE == "block") ONMODE = ((oncount == 1 && onprt && !onother) ? "prt" : "other")
   print "T\t" ONMODE
+  if (DMODE == "block") DMODE = ((oncount >= 1 && !ondbad) ? "ok" : "no")
+  print "D\t" DMODE
   if (TP) print "TP"
   for (i = 1; i <= njobs; i++) if (!(jobs[i] in jobperm)) print "NP\t" jobs[i]
 }
@@ -507,7 +535,7 @@ MG_RE='[Mm][Ee][Rr][Gg][Ee]-[Gg][Aa][Tt][Ee]'
 sfail() { echo "  FAIL  merge-gate spoofing: $1: $2"; SPOOF_FAIL=1; }
 # spoof_file <path> <blob> <changed 0|1>
 spoof_file() {
-  local p="$1" b="$2" changed="$3" size facts why line exempt=0 is_gate=0 r T
+  local p="$1" b="$2" changed="$3" size facts why line exempt=0 is_gate=0 r T w D
   [ "$p" = ".github/workflows/gate.yml" ] && is_gate=1
   # The blob is written once to a temp file and every check reads the file: each decision is made on
   # the captured output ([ -n "$line" ]), never on a pipeline's status, so a big file can't make a
@@ -542,8 +570,18 @@ spoof_file() {
     [ -n "$line" ] && sfail "$p" "contains the text 'merge-gate' (line $line)"
   fi
   [ "$changed" = 1 ] || return
-  r=$(printf '%s\n' "$facts" | sed -n "s/^W$TB//p" | sed -n 1p)
-  [ -n "$r" ] && sfail "$p" "grants write access to checks, statuses, issues, pull-requests, actions or security-events (line $r)"
+  # B2. Drift exception (task 4ea, decision 2026-11-27-4ea-drift-issues-write-exception.md): exactly
+  # .github/workflows/drift.yml, its only B2 write grant is one issues: write, all triggers allowlisted.
+  w=$(printf '%s\n' "$facts" | sed -n "s/^W$TB//p")
+  if [ -n "$w" ]; then
+    D=$(printf '%s\n' "$facts" | sed -n "s/^D$TB//p")
+    if [ "$p" = ".github/workflows/drift.yml" ] && [ "$(printf '%s\n' "$w" | grep -c .)" = 1 ] && [ "${w#*$TB}" = issues ] && [ "$D" = ok ]; then
+      echo "  PASS  merge-gate spoofing: .github/workflows/drift.yml: issues: write allowed (decision 2026-11-27-4ea-drift-issues-write-exception.md; triggers schedule/workflow_dispatch/check_run only)"
+    else
+      r=$(printf '%s\n' "$w" | sed -n 1p); r="${r%%$TB*}"
+      sfail "$p" "grants write access to checks, statuses, issues, pull-requests, actions or security-events (line $r)"
+    fi
+  fi
   if [ -z "$(printf '%s\n' "$facts" | sed -n '/^TP$/p')" ]; then
     r=$(printf '%s\n' "$facts" | sed -n "s/^NP$TB//p" | sed -n 1p)
     [ -n "$r" ] && sfail "$p" "leaves the token permissions to the repo default (no workflow-level permissions:, job '$r' has none)"
